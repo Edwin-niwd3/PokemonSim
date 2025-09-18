@@ -1,85 +1,153 @@
-import battlePkg from "pokemon-showdown/dist/sim/battle.js";
-import dexPkg from "pokemon-showdown/dist/sim/dex.js";
-import teampkg from "pokemon-showdown/dist/sim/teams.js";
+import {Dex, BattleStreams, RandomPlayerAI, Teams} from '@pkmn/sim';
 
-const { Battle } = battlePkg;
-const { Dex } = dexPkg;
-const { Teams } = teampkg;
-
-const battle = new Battle(Dex.forFormat("gen9vgc2025"));
-
-const team1Json = [
-  {
-    "name": "Bob",
-    "species": "Squirtle",
-    "gender": "",
-    "item": "",
-    "ability": "Rain Dish",
-    "evs": {"hp": 252, "atk": 0, "def": 0, "spa": 252, "spd": 4, "spe": 0},
-    "nature": "Modest",
-    "ivs": {"hp": 31, "atk": 31, "def": 31, "spa": 30, "spd": 30, "spe": 31},
-    "moves": ["Splash"]
-  },
-{
-    "name": "Dog",
-    "species": "Ludicolo",
-    "gender": "",
-    "item": "",
-    "ability": "Rain Dish",
-    "evs": {"hp": 252, "atk": 0, "def": 0, "spa": 252, "spd": 4, "spe": 0},
-    "nature": "Modest",
-    "ivs": {"hp": 31, "atk": 31, "def": 31, "spa": 30, "spd": 30, "spe": 31},
-    "moves": ["Splash"]
-  },
-]
+const streams = BattleStreams.getPlayerStreams(new BattleStreams.BattleStream());
+const spec = {formatid: 'gen7customgame'};
 
 const team2Json = [ 
   {
-    "name": "Fob",
-    "species": "Pikachu",
+    "name": "",
+    "species": "Articuno",
     "gender": "",
-    "item": "Lightorb",
-    "ability": "Static",
+    "item": "Leftovers",
+    "ability": "Pressure",
     "evs": {"hp": 252, "atk": 0, "def": 0, "spa": 252, "spd": 4, "spe": 0},
     "nature": "Modest",
     "ivs": {"hp": 31, "atk": 31, "def": 31, "spa": 30, "spd": 30, "spe": 31},
-    "moves": ["Thunderbolt"]
-  },{
-    "name": "Fog",
-    "species": "Raichu",
-    "gender": "",
-    "item": "Lightorb",
-    "ability": "Static",
-    "evs": {"hp": 252, "atk": 0, "def": 0, "spa": 252, "spd": 4, "spe": 0},
-    "nature": "Modest",
-    "ivs": {"hp": 31, "atk": 31, "def": 31, "spa": 30, "spd": 30, "spe": 31},
-    "moves": ["Thunderbolt"]
+    "moves": ["Ice Beam", "Hurricane", "Substitute", "Roost"]
   },
+  {
+    "name": "",
+    "species": "Ludicolo",
+    "gender": "",
+    "item": "Life Orb",
+    "ability": "Swift Swim",
+    "evs": {"hp": 4, "atk": 0, "def": 0, "spa": 252, "spd": 0, "spe": 252},
+    "nature": "Modest",
+    "moves": ["Surf", "Giga Drain", "Ice Beam", "Rain Dance"]
+  },
+  {
+    "name": "",
+    "species": "Volbeat",
+    "gender": "M",
+    "item": "Damp Rock",
+    "ability": "Prankster",
+    "evs": {"hp": 248, "atk": 0, "def": 252, "spa": 0, "spd": 8, "spe": 0},
+    "nature": "Bold",
+    "moves": ["Tail Glow", "Baton Pass", "Encore", "Rain Dance"]
+  },
+  {
+    "name": "",
+    "species": "Seismitoad",
+    "gender": "",
+    "item": "Life Orb",
+    "ability": "Swift Swim",
+    "evs": {"hp": 0, "atk": 0, "def": 0, "spa": 252, "spd": 4, "spe": 252},
+    "nature": "Modest",
+    "moves": ["Hydro Pump", "Earth Power", "Stealth Rock", "Rain Dance"]
+  },
+  {
+    "name": "",
+    "species": "Alomomola",
+    "gender": "",
+    "item": "Damp Rock",
+    "ability": "Regenerator",
+    "evs": {"hp": 252, "atk": 0, "def": 252, "spa": 0, "spd": 4, "spe": 0},
+    "nature": "Bold",
+    "moves": ["Wish", "Protect", "Toxic", "Rain Dance"]
+  },
+  {
+    "name": "",
+    "species": "Armaldo",
+    "gender": "",
+    "item": "Leftovers",
+    "ability": "Swift Swim",
+    "evs": {"hp": 128, "atk": 252, "def": 4, "spa": 0, "spd": 0, "spe": 124},
+    "nature": "Adamant",
+    "moves": ["X-Scissor", "Stone Edge", "Aqua Tail", "Rapid Spin"]
+   }
 ]
 
-const team1 = Teams.pack(team1Json);
-const team2 = Teams.pack(team2Json);
 
-battle.join("p1", "Player 1", 1, team1);
-battle.join("p2", "Player 2", 1, team2);
+const team1Json = [
+  {
+    "name": "",
+    "species": "Articuno",
+    "gender": "",
+    "item": "Leftovers",
+    "ability": "Pressure",
+    "evs": {"hp": 252, "atk": 0, "def": 0, "spa": 252, "spd": 4, "spe": 0},
+    "nature": "Modest",
+    "ivs": {"hp": 31, "atk": 31, "def": 31, "spa": 30, "spd": 30, "spe": 31},
+    "moves": ["Ice Beam", "Hurricane", "Substitute", "Roost"]
+  },
+  {
+    "name": "",
+    "species": "Ludicolo",
+    "gender": "",
+    "item": "Life Orb",
+    "ability": "Swift Swim",
+    "evs": {"hp": 4, "atk": 0, "def": 0, "spa": 252, "spd": 0, "spe": 252},
+    "nature": "Modest",
+    "moves": ["Surf", "Giga Drain", "Ice Beam", "Rain Dance"]
+  },
+  {
+    "name": "",
+    "species": "Volbeat",
+    "gender": "M",
+    "item": "Damp Rock",
+    "ability": "Prankster",
+    "evs": {"hp": 248, "atk": 0, "def": 252, "spa": 0, "spd": 8, "spe": 0},
+    "nature": "Bold",
+    "moves": ["Tail Glow", "Baton Pass", "Encore", "Rain Dance"]
+  },
+  {
+    "name": "",
+    "species": "Seismitoad",
+    "gender": "",
+    "item": "Life Orb",
+    "ability": "Swift Swim",
+    "evs": {"hp": 0, "atk": 0, "def": 0, "spa": 252, "spd": 4, "spe": 252},
+    "nature": "Modest",
+    "moves": ["Hydro Pump", "Earth Power", "Stealth Rock", "Rain Dance"]
+  },
+  {
+    "name": "",
+    "species": "Alomomola",
+    "gender": "",
+    "item": "Damp Rock",
+    "ability": "Regenerator",
+    "evs": {"hp": 252, "atk": 0, "def": 252, "spa": 0, "spd": 4, "spe": 0},
+    "nature": "Bold",
+    "moves": ["Wish", "Protect", "Toxic", "Rain Dance"]
+  },
+  {
+    "name": "",
+    "species": "Armaldo",
+    "gender": "",
+    "item": "Leftovers",
+    "ability": "Swift Swim",
+    "evs": {"hp": 128, "atk": 252, "def": 4, "spa": 0, "spd": 0, "spe": 124},
+    "nature": "Adamant",
+    "moves": ["X-Scissor", "Stone Edge", "Aqua Tail", "Rapid Spin"]
+   }
+]
 
-battle.choose("p1", "team 12");
-battle.choose("p2", "team 12");
 
-battle.choose("p1", "move 1");
-battle.choose("p2", "move 1");
+const p1spec = {name: 'Bot 1', team: Teams.pack(team1Json)};
+const p2spec = {name: 'Bot 2', team: Teams.pack(team2Json)};
 
-battle.choose("p1", "move 1");
-battle.choose("p2", "move 1");
+const p1 = new RandomPlayerAI(streams.p1);
+const p2 = new RandomPlayerAI(streams.p2);
 
-battle.choose("p1", "move 1");
-battle.choose("p2", "move 1");
+void p1.start();
+void p2.start(); 
 
-battle.choose("p1", "move 1");
-battle.choose("p2", "move 1");
+void streams.omniscient.write(`>start ${JSON.stringify(spec)}
+>player p1 ${JSON.stringify(p1spec)}
+>player p2 ${JSON.stringify(p2spec)}`);
 
-battle.choose("p1", "move 1");
-battle.choose("p2", "move 1");
-
-
-console.log(battle.log.join("\n"));
+void (async () => {
+  for await (const chunk of streams.omniscient) {
+    console.log(chunk);
+  }
+})();

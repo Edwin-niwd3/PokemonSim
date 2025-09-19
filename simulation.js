@@ -132,41 +132,102 @@ const team1Json = [
    }
 ]
 
-class AiTrainer {
-  constructor(playerName, playerId, team) {
-    this.name = playerName;
+const dex = Dex.forFormat(spec.formatid);
+
+class OffensiveAI extends RandomPlayerAI {
+  constructor(playerStream, playerId) {
+    super(playerStream);
     this.playerId = playerId;
-    this.team = team;
-    this.moveCounts = [0, 0, 0, 0, 0];
-    this.currentActive = "Articuno";
-    this.currentActiveId = 1;
+    
+    this.state = {
+      opponent: {
+        pokemon: new Set(),
+        active: null,
+        moves: new Map(),
+      },
+      turn: 0,
+    };
   }
-  makeMove(chunk) {
-    console.log(this.playerId, this.moveCounts);
-    let RandomNum = Math.floor(Math.random() * 4);
-    if (chunk.includes('|teampreview')) {
-      return `>${this.playerId} team 123456`;
+
+  recordMove(pokemon, move) {
+    if (!this.state.opponent.moves.has(pokemon)) {
+      this.state.opponent.moves.set(pokemon, new Set());
     }
-    else if (chunk.includes(`|faint|${this.playerId}`)) {
-      this.currentActive = this.team[this.currentActiveId + 1].species;
-      //Reset move counts on switch
-      this.moveCounts = [0, 0, 0, 0, 0];
-      return `>${this.playerId} switch ${this.currentActiveId + 1}`;
+
+    const knownMoves = this.state.opponent.moves.get(pokemon);
+    knownMoves.add(move);
+
+  }
+
+  updateState(chunk) {
+    const lines = chunk.split('\n');
+    for (const line of lines) {
+      //Manage what turn it is
+      if(line.includes('|turn|')){
+        this.state.turn = parseInt(line.split('|')[2]);
+      }
+
+      //Detect switches
+      if (line.includes('|switch|')) {
+        //Someone has switched pokemon, check if its the opponent
+        const parts = line.split('|');
+        const switchedPlayer = parts[2].startsWith('p1a') || parts[1].startsWith('p1b') ? 'p1' : 'p2';
+        if (switchedPlayer !== this.playerId) {
+          //clean string to only have pokemon name
+          const START_OF_NAME = 5; // Length of 'p2a: ' or 'p1a: '
+          let pokemonName = parts[2].slice(START_OF_NAME);
+          // Update the opponent's active Pokémon
+          this.state.opponent.pokemon.add(pokemonName);
+          this.state.opponent.active = pokemonName;
+        }
+      }
+
+      //Detect moves used by the opponent
+      if (line.includes('|move|')){
+        const parts = line.split('|');
+        //someone used a move, check if its the opponent
+        const movingPlayer = parts[2].startsWith('p1a') || parts[2].startsWith('p1b') ? 'p1' : 'p2';
+        if(movingPlayer !== this.playerId) {
+          const moveName = parts[3];
+          this.recordMove(this.state.opponent.active, moveName);
+        }
+      }
     }
-    else {
-      this.moveCounts[RandomNum+1]++;
-      return `>${this.playerId} move ${RandomNum + 1}`;
+  }
+
+  chooseMove(request) {
+    const moves = request.moves;
+    let bestMoveIndex = -1;
+    let maxPower = -1;
+
+    for (let i = 0; i < moves.length; i++) {
+      const move = moves[i];
+      if (move.disabled) continue;
+
+      const moveData = dex.moves.get(move.id);
+      if (moveData.basePower > maxPower) {
+        maxPower = moveData.basePower;
+        bestMoveIndex = i + 1;
+      }
+    }
+
+    if (bestMoveIndex !== -1) {
+      return `move ${bestMoveIndex}`;
+    } else {
+      // Fallback to a random move if no offensive move is found
+      return super.chooseMove(request);
     }
   }
 }
 
-
-
 const p1spec = {name: 'Bot 1', team: Teams.pack(team1Json)};
 const p2spec = {name: 'Bot 2', team: Teams.pack(team2Json)};
 
-const p1 = new AiTrainer('Bot 1', 'p1', team1Json);
-const p2 = new AiTrainer('Bot 2', 'p2', team2Json);
+const p1 = new OffensiveAI(streams.p1, 'p1');
+const p2 = new OffensiveAI(streams.p2, 'p2');
+
+void p1.start();
+void p2.start();
 
 void streams.omniscient.write(`>start ${JSON.stringify(spec)}
 >player p1 ${JSON.stringify(p1spec)}
@@ -174,15 +235,36 @@ void streams.omniscient.write(`>start ${JSON.stringify(spec)}
 
 void (async () => {
   for await (const chunk of streams.omniscient) {
-    console.log(chunk)
-      const p1Move = p1.makeMove(chunk);
-      const p2Move = p2.makeMove(chunk);
-      void streams.omniscient.write(p1Move);
-      void streams.omniscient.write(p2Move);
-
-      console.log(p1Move);
-      console.log(p2Move);
+    // console.log(chunk); // You can uncomment this for detailed battle logs
+    p1.updateState(chunk);
+    p2.updateState(chunk);
   }
-  console.log('Ran out of chunks');
-})();
 
+  // --- Intel Report Generation ---
+  console.log("\n\n--- BATTLE FINISHED: INTEL REPORT ---");
+
+  function generateReport(player, playerName) {
+    console.log(`\n--- ${playerName}'s Intel on Opponent ---`);
+    const opponentPokemon = Array.from(player.state.opponent.pokemon);
+    if (opponentPokemon.length === 0) {
+      console.log("No Pokémon were identified.");
+      return;
+    }
+
+    console.log(`Identified Pokémon: ${opponentPokemon.join(', ')}`);
+    console.log("Known Moves:");
+    if (player.state.opponent.moves.size === 0) {
+      console.log("  No moves were recorded.");
+      return;
+    }
+    for (const [pokemon, moves] of player.state.opponent.moves.entries()) {
+      const moveList = Array.from(moves).join(', ');
+      console.log(`  - ${pokemon}: [${moveList}]`);
+    }
+  }
+
+  generateReport(p1, p1spec.name);
+  generateReport(p2, p2spec.name);
+  console.log("\n-------------------------------------\n");
+
+})();

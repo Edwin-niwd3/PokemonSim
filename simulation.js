@@ -138,7 +138,7 @@ class OffensiveAI extends RandomPlayerAI {
   constructor(playerStream, playerId) {
     super(playerStream);
     this.playerId = playerId;
-    
+    this.protectedFlag = false; // Flag to track if Protect was used last turn
     this.state = {
       opponent: {
         pokemon: new Set(),
@@ -196,7 +196,38 @@ class OffensiveAI extends RandomPlayerAI {
   }
 
   chooseMove(request) {
+    /** TODO:
+     * Implement a more robust attack strategy, consider type advantages and stab
+     * Add in switching when facing an opponent that has a type advantage move against us
+     * Implement status moves like Toxic to wear down bulky opponents
+     * Consider using Priority moves when low on health/going for an aggressive kill
+     */
+
+
     const moves = request.moves;
+    //Play slower, survive longer, gather more intel
+    if (this.state.turn <= 3) {
+      console.log(`Turn ${this.state.turn}: Prioritizing survival moves.`);
+      //Prioritize survival moves if available
+      const survivalMoves = ['protect', 'substitute', 'roost', 'wish'];
+      for (let i = 0; i < moves.length; i++) {
+        const move = moves[i];
+        console.log(`Evaluating move: ${move.id}, disabled: ${move.disabled}`);
+        if (move.disabled) continue;
+        if (survivalMoves.includes(move.id)) {
+          // If Protect was used last turn, avoid using it again immediately
+          if (move.id === 'protect' || (move.id === 'wish' || move.id === 'substitute' && this.protectedFlag)) {
+            continue;
+          }
+          //If we use protect this turn, set the flag to true, otherwise reset it
+          this.protectedFlag = move.id === 'protect';
+          return `move ${i + 1}`;
+        }
+      }
+    }
+
+
+    //Agressive strategy: Choose the move with the highest base power
     let bestMoveIndex = -1;
     let maxPower = -1;
 
@@ -235,7 +266,7 @@ void streams.omniscient.write(`>start ${JSON.stringify(spec)}
 
 void (async () => {
   for await (const chunk of streams.omniscient) {
-    // console.log(chunk); // You can uncomment this for detailed battle logs
+    console.log(chunk); // You can uncomment this for detailed battle logs
     p1.updateState(chunk);
     p2.updateState(chunk);
   }

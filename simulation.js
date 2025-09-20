@@ -140,6 +140,10 @@ class OffensiveAI extends RandomPlayerAI {
     this.playerId = playerId;
     this.protectedFlag = false; // Flag to track if Protect was used last turn
     this.state = {
+      player: {
+        active: null,
+        status: null,
+      },
       opponent: {
         pokemon: new Set(),
         active: null,
@@ -180,6 +184,12 @@ class OffensiveAI extends RandomPlayerAI {
           this.state.opponent.pokemon.add(pokemonName);
           this.state.opponent.active = pokemonName;
         }
+        else {
+          //clean string to only have pokemon name
+          const START_OF_NAME = 5; // Length of 'p2a: ' or 'p1a: '
+          let pokemonName = parts[2].slice(START_OF_NAME);
+          this.state.player.active = pokemonName;
+        }
       }
 
       //Detect moves used by the opponent
@@ -207,12 +217,10 @@ class OffensiveAI extends RandomPlayerAI {
     const moves = request.moves;
     //Play slower, survive longer, gather more intel
     if (this.state.turn <= 3) {
-      console.log(`Turn ${this.state.turn}: Prioritizing survival moves.`);
       //Prioritize survival moves if available
       const survivalMoves = ['protect', 'substitute', 'roost', 'wish'];
       for (let i = 0; i < moves.length; i++) {
         const move = moves[i];
-        console.log(`Evaluating move: ${move.id}, disabled: ${move.disabled}`);
         if (move.disabled) continue;
         if (survivalMoves.includes(move.id)) {
           // If Protect was used last turn, avoid using it again immediately
@@ -230,14 +238,34 @@ class OffensiveAI extends RandomPlayerAI {
     //Agressive strategy: Choose the move with the highest base power
     let bestMoveIndex = -1;
     let maxPower = -1;
+    const STAB_BONUS = 1.5; // 50% bonus for STAB moves
+    const EFFECTIVNESS = 2; // 100% bonus for super effective moves
 
     for (let i = 0; i < moves.length; i++) {
       const move = moves[i];
       if (move.disabled) continue;
 
       const moveData = dex.moves.get(move.id);
-      if (moveData.basePower > maxPower) {
-        maxPower = moveData.basePower;
+      const opponentData = dex.species.get(this.state.opponent.active);
+      const playerData = dex.species.get(this.state.player.active);
+
+      console.log(`Evaluating move: ${move.id}, Type: ${moveData.type}, Base Power: ${moveData.basePower}`);
+      console.log(`Opponent Active: ${opponentData.types}`);
+      console.log(`Player Active: ${playerData.types}`);
+
+      // Calculate modified power considering STAB and type effectiveness
+      let modifiedPower = moveData.basePower;
+      if (moveData.type === opponentData.weakness) {
+        modifiedPower *= EFFECTIVNESS;
+      } else if (moveData.type === opponentData.resistance) {
+        modifiedPower /= EFFECTIVNESS;
+      }
+      if (playerData.types.includes(moveData.type)) {
+        console.log(`Applying STAB for move ${move.id} of type ${moveData.type} for Pokemon ${this.state.player.active}`);
+        modifiedPower *= STAB_BONUS;
+      }
+      if (modifiedPower > maxPower) {
+        maxPower = modifiedPower;
         bestMoveIndex = i + 1;
       }
     }

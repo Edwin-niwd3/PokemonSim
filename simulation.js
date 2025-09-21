@@ -1,7 +1,11 @@
 import {Dex, BattleStreams, RandomPlayerAI, Teams} from '@pkmn/sim';
+import * as pokeDex from '@pkmn/dex';
+import {Generations} from "@pkmn/data";
 
 const streams = BattleStreams.getPlayerStreams(new BattleStreams.BattleStream());
 const spec = {formatid: 'gen9customgame'};
+const gens = new Generations(pokeDex)
+const generation = gens.get(spec.formatid).num
 
 const team2Json = [ 
   {
@@ -132,6 +136,7 @@ const team1Json = [
    }
 ]
 
+
 const dex = Dex.forFormat(spec.formatid);
 
 class OffensiveAI extends RandomPlayerAI {
@@ -249,17 +254,15 @@ class OffensiveAI extends RandomPlayerAI {
       const opponentData = dex.species.get(this.state.opponent.active);
       const playerData = dex.species.get(this.state.player.active);
 
-      console.log(`Evaluating move: ${move.id}, Type: ${moveData.type}, Base Power: ${moveData.basePower}`);
-      console.log(`Opponent Active: ${opponentData.types}`);
-      console.log(`Player Active: ${playerData.types}`);
+      //console.log(`Evaluating move: ${move.id}, Type: ${moveData.type}, Base Power: ${moveData.basePower}`);
+      //console.log(`Opponent Active: ${opponentData.types}`);
+      //console.log(`Player Active: ${playerData.types}`);
 
       // Calculate modified power considering STAB and type effectiveness
       let modifiedPower = moveData.basePower;
-      if (moveData.type === opponentData.weakness) {
-        modifiedPower *= EFFECTIVNESS;
-      } else if (moveData.type === opponentData.resistance) {
-        modifiedPower /= EFFECTIVNESS;
-      }
+      
+      modifiedPower *= gens.get(generation).types.totalEffectiveness(moveData.type, opponentData.types);
+
       if (playerData.types.includes(moveData.type)) {
         console.log(`Applying STAB for move ${move.id} of type ${moveData.type} for Pokemon ${this.state.player.active}`);
         modifiedPower *= STAB_BONUS;

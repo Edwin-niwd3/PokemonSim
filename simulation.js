@@ -1,5 +1,5 @@
 import {Dex, BattleStreams, RandomPlayerAI, Teams} from '@pkmn/sim';
-import * as pokeDex from '@pkmn/dex';
+import {Dex as pokeDex} from '@pkmn/dex';
 import {Generations} from "@pkmn/data";
 
 const streams = BattleStreams.getPlayerStreams(new BattleStreams.BattleStream());
@@ -146,6 +146,7 @@ class OffensiveAI extends RandomPlayerAI {
     this.protectedFlag = false; // Flag to track if Protect was used last turn
     this.state = {
       player: {
+        //TODO: Keep track of if we have a substitute or not
         active: null,
         status: null,
       },
@@ -260,11 +261,10 @@ class OffensiveAI extends RandomPlayerAI {
 
       // Calculate modified power considering STAB and type effectiveness
       let modifiedPower = moveData.basePower;
-      
+      console.log("Previous modifiedPower: " + modifiedPower)
       modifiedPower *= gens.get(generation).types.totalEffectiveness(moveData.type, opponentData.types);
-
+      console.log("After modifiedPower: " + modifiedPower)
       if (playerData.types.includes(moveData.type)) {
-        console.log(`Applying STAB for move ${move.id} of type ${moveData.type} for Pokemon ${this.state.player.active}`);
         modifiedPower *= STAB_BONUS;
       }
       if (modifiedPower > maxPower) {

@@ -159,6 +159,26 @@ class OffensiveAI extends RandomPlayerAI {
     };
   }
 
+    chooseMove(request) {
+    /** TODO:
+     * Implement a more robust attack strategy, consider type advantages and stab
+     * Add in switching when facing an opponent that has a type advantage move against us
+     * Implement status moves like Toxic to wear down bulky opponents
+     * Consider using Priority moves when low on health/going for an aggressive kill
+     */
+
+    const moves = request.moves;
+    //Play slower, survive longer, gather more intel
+    if (this.state.turn <= 3) {
+      return this.survivalPlaystyle(moves);
+    }
+    //If the opponent has a super effective move against us, that we know about, try switching to a pkmn with type advantage.
+    
+
+    //Agressive strategy: Choose the move with the highest base power
+    return this.aggresivePlaystyle(moves);
+  }
+
   recordMove(pokemon, move) {
     if (!this.state.opponent.moves.has(pokemon)) {
       this.state.opponent.moves.set(pokemon, new Set());
@@ -211,19 +231,8 @@ class OffensiveAI extends RandomPlayerAI {
     }
   }
 
-  chooseMove(request) {
-    /** TODO:
-     * Implement a more robust attack strategy, consider type advantages and stab
-     * Add in switching when facing an opponent that has a type advantage move against us
-     * Implement status moves like Toxic to wear down bulky opponents
-     * Consider using Priority moves when low on health/going for an aggressive kill
-     */
-
-
-    const moves = request.moves;
-    //Play slower, survive longer, gather more intel
-    if (this.state.turn <= 3) {
-      //Prioritize survival moves if available
+  survivalPlaystyle(moves) {
+    //Prioritize survival moves if available
       const survivalMoves = ['protect', 'substitute', 'roost', 'wish'];
       for (let i = 0; i < moves.length; i++) {
         const move = moves[i];
@@ -238,10 +247,9 @@ class OffensiveAI extends RandomPlayerAI {
           return `move ${i + 1}`;
         }
       }
-    }
+  }
 
-
-    //Agressive strategy: Choose the move with the highest base power
+  aggresivePlaystyle(moves) {
     let bestMoveIndex = -1;
     let maxPower = -1;
     const STAB_BONUS = 1.5; // 50% bonus for STAB moves
@@ -255,15 +263,11 @@ class OffensiveAI extends RandomPlayerAI {
       const opponentData = dex.species.get(this.state.opponent.active);
       const playerData = dex.species.get(this.state.player.active);
 
-      //console.log(`Evaluating move: ${move.id}, Type: ${moveData.type}, Base Power: ${moveData.basePower}`);
-      //console.log(`Opponent Active: ${opponentData.types}`);
-      //console.log(`Player Active: ${playerData.types}`);
-
       // Calculate modified power considering STAB and type effectiveness
       let modifiedPower = moveData.basePower;
-      console.log("Previous modifiedPower: " + modifiedPower)
+
       modifiedPower *= gens.get(generation).types.totalEffectiveness(moveData.type, opponentData.types);
-      console.log("After modifiedPower: " + modifiedPower)
+      
       if (playerData.types.includes(moveData.type)) {
         modifiedPower *= STAB_BONUS;
       }
@@ -280,6 +284,8 @@ class OffensiveAI extends RandomPlayerAI {
       return super.chooseMove(request);
     }
   }
+
+
 }
 
 const p1spec = {name: 'Bot 1', team: Teams.pack(team1Json)};

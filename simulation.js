@@ -170,11 +170,26 @@ class OffensiveAI extends RandomPlayerAI {
     const moves = request.moves;
     //Play slower, survive longer, gather more intel
     if (this.state.turn <= 3) {
-      return this.survivalPlaystyle(moves);
+      return this.scoutingPlaystyle(moves);
     }
     //If the opponent has a super effective move against us, that we know about, try switching to a pkmn with type advantage.
-    
+    const activeOpponent = this.state.opponent.active;
+    const opponentMoves = this.state.opponent.moves.get(activeOpponent);
+    const activePokemon = this.state.player.active;
 
+    //If we know the opponent moves, check them all to make sure they can't hit us with a super effective
+    if (opponentMoves) {
+      for (const moveName of opponentMoves) {
+        const moveTypes = gens.get(generation).moves.get(moveName).type;
+        const pokemonTypes = gens.get(generation).species.get(activePokemon)?.types;
+        console.log(activePokemon + ' ' + pokemonTypes)
+        
+        if (pokemonTypes && gens.get(generation).types.totalEffectiveness(moveTypes, pokemonTypes) > 1) {
+          //Logic for switching
+          console.log("We should switch here!");
+        }
+    }
+  }
     //Agressive strategy: Choose the move with the highest base power
     return this.aggresivePlaystyle(moves);
   }
@@ -231,7 +246,7 @@ class OffensiveAI extends RandomPlayerAI {
     }
   }
 
-  survivalPlaystyle(moves) {
+  scoutingPlaystyle(moves) {
     //Prioritize survival moves if available
       const survivalMoves = ['protect', 'substitute', 'roost', 'wish'];
       for (let i = 0; i < moves.length; i++) {

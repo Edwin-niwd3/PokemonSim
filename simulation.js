@@ -140,18 +140,23 @@ const team1Json = [
 const dex = Dex.forFormat(spec.formatid);
 
 class OffensiveAI extends RandomPlayerAI {
-  constructor(playerStream, playerId) {
+  constructor(playerStream, playerId, teamJson) {
     super(playerStream);
     this.playerId = playerId;
+    // store a deep copy of the provided team JSON so each AI has its own immutable copy
+    this.teamJson = teamJson ? JSON.parse(JSON.stringify(teamJson)) : [];
+    // also keep the packed team string the simulator uses (if needed elsewhere)
+    this.team = this.teamJson;
     this.protectedFlag = false; // Flag to track if Protect was used last turn
     this.state = {
       player: {
         //TODO: Keep track of if we have a substitute or not
         active: null,
         status: null,
+        activeIndex: null,
       },
       opponent: {
-        pokemon: new Set(),
+        pokemon: [],
         active: null,
         moves: new Map(),
       },
@@ -182,11 +187,28 @@ class OffensiveAI extends RandomPlayerAI {
       for (const moveName of opponentMoves) {
         const moveTypes = gens.get(generation).moves.get(moveName).type;
         const pokemonTypes = gens.get(generation).species.get(activePokemon)?.types;
-        console.log(activePokemon + ' ' + pokemonTypes)
+        let max_effectiveness = 0;
+        if( pokemonTypes){
+          max_effectiveness = gens.get(generation).types.totalEffectiveness(moveTypes, pokemonTypes);
+        }
         
-        if (pokemonTypes && gens.get(generation).types.totalEffectiveness(moveTypes, pokemonTypes) > 1) {
-          //Logic for switching
-          console.log("We should switch here!");
+        if (pokemonTypes && max_effectiveness > 1) {
+          //Look through each pokemon on our team and see who takes the least amount of dmg
+          let slot = 1;
+          let swap = slot;
+          for (const mon of this.teamJson) {
+            const type = gens.get(generation).species.get(mon.species)?.type;
+            if (!type){
+              continue;
+            } 
+            let effectiveness = gens.get(generation).types.totalEffectiveness(moveTypes, type);
+            if (effectiveness < max_effectiveness) {
+              swap = slot;
+              max_effectiveness = effectiveness;
+            }
+            slot++;
+          }
+          return `switch ${swap}`
         }
     }
   }
@@ -222,7 +244,10 @@ class OffensiveAI extends RandomPlayerAI {
           const START_OF_NAME = 5; // Length of 'p2a: ' or 'p1a: '
           let pokemonName = parts[2].slice(START_OF_NAME);
           // Update the opponent's active Pokémon
-          this.state.opponent.pokemon.add(pokemonName);
+          // store unique list of seen opponent pokemon in an array
+          if (!this.state.opponent.pokemon.includes(pokemonName)) {
+            this.state.opponent.pokemon.push(pokemonName);
+          }
           this.state.opponent.active = pokemonName;
         }
         else {
@@ -306,8 +331,8 @@ class OffensiveAI extends RandomPlayerAI {
 const p1spec = {name: 'Bot 1', team: Teams.pack(team1Json)};
 const p2spec = {name: 'Bot 2', team: Teams.pack(team2Json)};
 
-const p1 = new OffensiveAI(streams.p1, 'p1');
-const p2 = new OffensiveAI(streams.p2, 'p2');
+const p1 = new OffensiveAI(streams.p1, 'p1', team1Json);
+const p2 = new OffensiveAI(streams.p2, 'p2', team2Json);
 
 void p1.start();
 void p2.start();
@@ -328,7 +353,7 @@ void (async () => {
 
   function generateReport(player, playerName) {
     console.log(`\n--- ${playerName}'s Intel on Opponent ---`);
-    const opponentPokemon = Array.from(player.state.opponent.pokemon);
+    const opponentPokemon = player.state.opponent.pokemon;
     if (opponentPokemon.length === 0) {
       console.log("No Pokémon were identified.");
       return;

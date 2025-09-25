@@ -153,7 +153,7 @@ class OffensiveAI extends RandomPlayerAI {
         //TODO: Keep track of if we have a substitute or not
         active: null,
         status: null,
-        activeIndex: null,
+        activeIndex: 1,
       },
       opponent: {
         pokemon: [],
@@ -197,10 +197,12 @@ class OffensiveAI extends RandomPlayerAI {
           let slot = 1;
           let swap = slot;
           for (const mon of this.teamJson) {
-            const type = gens.get(generation).species.get(mon.species)?.type;
+            const type = gens.get(generation).species.get(mon.species)?.types;
             if (!type){
+              console.log(`We skipped ${mon.species} because we couldn't get its type`)
               continue;
             } 
+
             let effectiveness = gens.get(generation).types.totalEffectiveness(moveTypes, type);
             if (effectiveness < max_effectiveness) {
               swap = slot;
@@ -208,7 +210,11 @@ class OffensiveAI extends RandomPlayerAI {
             }
             slot++;
           }
-          return `switch ${swap}`
+          if (this.state.player.activeIndex !== swap) {
+            this.state.player.activeIndex = swap
+            console.log("Swapping!")
+            return `switch ${swap}`
+          }
         }
     }
   }

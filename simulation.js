@@ -139,6 +139,13 @@ const team1Json = [
 
 const dex = Dex.forFormat(spec.formatid);
 
+/**
+ * @TODO Implement a better way to choose a move, try using an equation to weight which move would be best
+ * @TODO Save the current status effect on whatever pokemon is active, try looking for '-status' in the chunk (I think?)
+ * @example try using leftovers-again, elitefour.js weighted algorithm to decide on the equation
+ */
+
+
 class OffensiveAI extends RandomPlayerAI {
   constructor(playerStream, playerId, teamJson) {
     super(playerStream);
@@ -176,11 +183,6 @@ class OffensiveAI extends RandomPlayerAI {
   }
     //TOOLS-----------------------------------------------------------------------------
     chooseMove(request) {
-    /** TODO:
-     * Implement status moves like Toxic to wear down bulky opponents
-     * Consider using Priority moves when low on health/going for an aggressive kill
-     */
-
     const moves = request.moves;
     //Play slower, survive longer, gather more intel
     if (this.state.turn <= 3) {

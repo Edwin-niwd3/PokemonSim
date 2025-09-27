@@ -7,6 +7,33 @@ const spec = {formatid: 'gen9customgame'};
 const gens = new Generations(pokeDex)
 const generation = gens.get(spec.formatid).num
 
+const WEIGHTS = {
+        effectiveness : {
+          weight: 10,
+          value: (val) => {
+            return {
+              0:0,
+              0.5:1,
+              1:2,
+              2:10,
+              4:20
+            }[val];
+          }
+        },
+        stab:{
+          weight: 10
+        },
+        status: {
+          weight:10
+        },
+        recoil: {
+          weight: -5
+        },
+        etc: {
+          weight: 1
+        }
+      };
+
 const team2Json = [ 
   {
     "name": "",
@@ -57,7 +84,7 @@ const team2Json = [
     "ability": "Regenerator",
     "evs": {"hp": 252, "atk": 0, "def": 252, "spa": 0, "spd": 4, "spe": 0},
     "nature": "Bold",
-    "moves": ["Wish", "Protect", "Toxic", "Rain Dance"]
+    "moves": ["Quick Attack", "Protect", "Toxic", "Rain Dance"]
   },
   {
     "name": "",
@@ -154,20 +181,23 @@ class OffensiveAI extends RandomPlayerAI {
     this.teamJson = teamJson ? JSON.parse(JSON.stringify(teamJson)) : [];
     // also keep the packed team string the simulator uses (if needed elsewhere)
     this.team = this.teamJson;
-    this.protectedFlag = false; // Flag to track if Protect was used last turn
     this.fainted = []
     this.legend = new Map();
+    this.weights = WEIGHTS;
+    this.randomnessExponent = 1;
     this.state = {
       player: {
         //TODO: Keep track of if we have a substitute or not
         active: null,
         status: null,
         activeIndex: 1,
+        lastMove: null,
       },
       opponent: {
         pokemon: [],
         active: null,
         moves: new Map(),
+        statusEffects: new Map(),
       },
       turn: 0,
     };
@@ -183,22 +213,23 @@ class OffensiveAI extends RandomPlayerAI {
   }
     //TOOLS-----------------------------------------------------------------------------
     chooseMove(request) {
-    const moves = request.moves;
-    //Play slower, survive longer, gather more intel
-    if (this.state.turn <= 3) {
-      return this.scoutingPlaystyle(moves);
-    }
-    //If the opponent has a super effective move against us, that we know about, try switching to a pkmn with type advantage.
-    const activeOpponent = this.state.opponent.active;
-    const opponentMoves = this.state.opponent.moves.get(activeOpponent);
-    const activePokemon = this.state.player.active;
+      const moves = request.moves;
+      
+      //Play slower, survive longer, gather more intel
+      if (this.state.turn <= 3) {
+        return this.scoutingPlaystyle(moves);
+      }
+      //If the opponent has a super effective move against us, that we know about, try switching to a pkmn with type advantage.
+      const activeOpponent = this.state.opponent.active;
+      const opponentMoves = this.state.opponent.moves.get(activeOpponent);
+      const activePokemon = this.state.player.active;
 
-    //If we know the opponent moves, check them all to make sure they can't hit us with a super effective
-    if (opponentMoves) {
-      this.survivalPlaystyle(opponentMoves, activePokemon);
-  }
-    //Agressive strategy: Choose the move with the highest base power
-    return this.aggresivePlaystyle(moves, activePokemon);
+      //If we know the opponent moves, check them all to make sure they can't hit us with a super effective
+      if (opponentMoves) {
+        this.survivalPlaystyle(opponentMoves, activePokemon);
+      }
+      //Agressive strategy: Choose the move with the highest base power
+      return this.aggresivePlaystyle(moves, request);
   }
 
   recordMove(pokemon, move) {
@@ -209,6 +240,15 @@ class OffensiveAI extends RandomPlayerAI {
     const knownMoves = this.state.opponent.moves.get(pokemon);
     knownMoves.add(move);
 
+  }
+
+  recordStatus(pokemon, status) { 
+    if(!this.state.opponent.statusEffects.has(pokemon)) {
+      this.state.opponent.statusEffects.set(pokemon, status);
+    }
+
+    let knownStatus = this.state.opponent.statusEffects.get(pokemon);
+    knownStatus = status;
   }
 
   updateState(chunk) {
@@ -232,6 +272,21 @@ class OffensiveAI extends RandomPlayerAI {
       if (line.includes('fnt')) {
        this.handleFaint(line); 
       }
+      if (line.includes('-status')) {
+        this.handleStatus(line);
+      }
+    }
+  }
+
+  handleStatus(line) {
+    const parts = line.split('|');
+    const switchedPlayer = parts[2].startsWith('p1a') || parts[1].startsWith('p1b') ? 'p1' : 'p2';
+    if (switchedPlayer !== this.playerId) { 
+      //parts[3] holds what status effect the pokemon has
+      const START_OF_NAME = 5;
+      let status = parts[3];
+      let pokemonName = parts[2].slice(START_OF_NAME);
+      this.recordStatus(pokemonName, status);
     }
   }
 
@@ -282,6 +337,44 @@ class OffensiveAI extends RandomPlayerAI {
     this.fainted[key] = true
   }
 
+  sumFitness(obj) {
+    let sum = 0;
+    for (const key in obj) {
+      if (this.weights[key]) {
+        // run the value function if it exists;
+        // else, convert the value to a number and use that.
+        const value = this.weights[key].value
+          ? this.weights[key].value(obj[key])
+          : +obj[key];
+
+        sum = sum + this.weights[key].weight * value;
+      }
+    }
+    return sum;
+  }
+   pickMoveByFitness(moveArr) {
+    let total = 0;
+    const weighted = {};
+    for (const move in moveArr) {
+      if ({}.hasOwnProperty.call(moveArr, move)) {
+        weighted[move] = moveArr[move] >= 0
+          ? Math.pow(moveArr[move], this.randomnessExponent)
+          : 0;
+        total += weighted[move];
+      }
+    }
+    const myVal = Math.random() * total;
+    let accum = 0;
+    for (const move in weighted) {
+      if ({}.hasOwnProperty.call(weighted, move)) {
+        accum += weighted[move];
+        if (accum > myVal) return move;
+      }
+    }
+    // something went wrong
+    return false;
+  }
+
   //Playstyles-----------------------------------------------------------------------------
   survivalPlaystyle(opponentMoves, activePokemon) {
     for (const moveName of opponentMoves) {
@@ -299,7 +392,6 @@ class OffensiveAI extends RandomPlayerAI {
           for (const mon of this.teamJson) {
             const type = gens.get(generation).species.get(mon.species)?.types;
             if (!type){
-              console.log(`We skipped ${mon.species} because we couldn't get its type`)
               continue;
             } 
 
@@ -327,17 +419,67 @@ class OffensiveAI extends RandomPlayerAI {
         if (move.disabled) continue;
         if (survivalMoves.includes(move.id)) {
           // If Protect was used last turn, avoid using it again immediately
-          if (move.id === 'protect' || (move.id === 'wish' || move.id === 'substitute' && this.protectedFlag)) {
+          if (move.id === this.lastMove) {
             continue;
           }
           //If we use protect this turn, set the flag to true, otherwise reset it
-          this.protectedFlag = move.id === 'protect';
+          this.lastMove = moves[i];
           return `move ${i + 1}`;
         }
       }
   }
 
-  aggresivePlaystyle(moves) {
+  aggresivePlaystyle(moves, request) {
+      const fitness = {};
+      const totalfitness = {};
+      //Setup the fitness score of each move
+      moves.forEach((move) => {
+        if (move.disabled) return;
+        
+        const moveData = dex.moves.get(move.id);
+        const opponentData = dex.species.get(this.state.opponent.active);
+        const playerData = dex.species.get(this.state.player.active);
+
+        fitness[move.id] = {};
+
+        fitness[move.id].effectiveness = gens.get(generation).types.totalEffectiveness(moveData.type, opponentData.types);
+
+        fitness[move.id].stabby = playerData.types.includes(moveData.type) ? true : false;
+
+        let effect = moveData.status ? true : false
+        if (effect && this.state.player.lastMove != moveData.name) {
+          if (!this.state.opponent.statusEffects.has(opponentData.name)) {
+            fitness[move.id].status = gens.get(generation).moves.get(moveData.name)?.secondaries?[0].chance : 0;
+          }
+        }
+
+        // Use to prioritize a priority move that will kill
+        // if (gens.get(generation).moves.get(moveData.name)?.priority > 0){
+        // }
+
+        if (gens.get(generation).moves.get(moveData.name)?.recoil)
+        {
+          fitness[move.id].recoil = true;
+        }
+
+        if (move.id === 'flail') {
+          fitness[move.id].bonus = 20;
+        }
+
+        totalfitness[move.id] = this.sumFitness(fitness[move.id]);
+      });
+
+      const move = this.pickMoveByFitness(totalfitness)
+      if (move) {
+        this.lastMove = move;
+        return `move ${move}`
+      }
+      else {
+        return super.choose(request)
+      }
+    
+    /*
+    ------------------------------OLD STRATEGY FOR CHOOSING MOVE--------------------------------------------
     let bestMoveIndex = -1;
     let maxPower = -1;
     const STAB_BONUS = 1.5; // 50% bonus for STAB moves
@@ -374,9 +516,10 @@ class OffensiveAI extends RandomPlayerAI {
     if (bestMoveIndex !== -1) {
       return `move ${bestMoveIndex}`;
     } else {
-      // Fallback to a random move if no offensive move is found
-      return super.chooseMove(request);
+    // Fallback to a random move if no offensive move is found
+    return super.chooseMove(request);
     }
+    */
   }
 
 
@@ -414,13 +557,12 @@ void (async () => {
       console.log("No Pokémon were identified.");
       return;
     }
-    console.log(`Status of Pokemon: `);
-    for (const mon of player.teamJson) {
-      let key = player.legend.get(mon.species)
-      console.log(`${mon.species}: ${player.fainted[key]}`)
-    }
 
     console.log(`Identified Pokémon: ${opponentPokemon.join(', ')}`);
+    console.log('Known Status Effects on Pokemon:');
+    for (const[pokemon, status] of player.state.opponent.statusEffects.entries()) {
+      console.log(` -${pokemon}: ${status}`)
+    }
     console.log("Known Moves:");
     if (player.state.opponent.moves.size === 0) {
       console.log("  No moves were recorded.");

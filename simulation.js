@@ -6,6 +6,7 @@ const streams = BattleStreams.getPlayerStreams(new BattleStreams.BattleStream())
 const spec = {formatid: 'gen9customgame'};
 const gens = new Generations(pokeDex)
 const generation = gens.get(spec.formatid).num
+const POKEDEX = gens.get(generation);
 
 const WEIGHTS = {
         effectiveness : {
@@ -167,9 +168,7 @@ const team1Json = [
 const dex = Dex.forFormat(spec.formatid);
 
 /**
- * @TODO Implement a better way to choose a move, try using an equation to weight which move would be best
- * @TODO Save the current status effect on whatever pokemon is active, try looking for '-status' in the chunk (I think?)
- * @example try using leftovers-again, elitefour.js weighted algorithm to decide on the equation
+ * @TODO - Handle saving opponent hp% so we can include priority killing as a weight in move choice
  */
 
 
@@ -378,11 +377,11 @@ class OffensiveAI extends RandomPlayerAI {
   //Playstyles-----------------------------------------------------------------------------
   survivalPlaystyle(opponentMoves, activePokemon) {
     for (const moveName of opponentMoves) {
-        const moveTypes = gens.get(generation).moves.get(moveName).type;
-        const pokemonTypes = gens.get(generation).species.get(activePokemon)?.types;
+        const moveTypes = POKEDEX.moves.get(moveName).type;
+        const pokemonTypes = POKEDEX.species.get(activePokemon)?.types;
         let max_effectiveness = 0;
         if( pokemonTypes){
-          max_effectiveness = gens.get(generation).types.totalEffectiveness(moveTypes, pokemonTypes);
+          max_effectiveness = POKEDEX.types.totalEffectiveness(moveTypes, pokemonTypes);
         }
         
         if (pokemonTypes && max_effectiveness > 1) {
@@ -390,12 +389,12 @@ class OffensiveAI extends RandomPlayerAI {
           let slot = 1;
           let swap = slot;
           for (const mon of this.teamJson) {
-            const type = gens.get(generation).species.get(mon.species)?.types;
+            const type = POKEDEX.species.get(mon.species)?.types;
             if (!type){
               continue;
             } 
 
-            let effectiveness = gens.get(generation).types.totalEffectiveness(moveTypes, type);
+            let effectiveness = POKEDEX.types.totalEffectiveness(moveTypes, type);
             if (effectiveness < max_effectiveness) {
               swap = slot;
               max_effectiveness = effectiveness;
@@ -442,22 +441,22 @@ class OffensiveAI extends RandomPlayerAI {
 
         fitness[move.id] = {};
 
-        fitness[move.id].effectiveness = gens.get(generation).types.totalEffectiveness(moveData.type, opponentData.types);
+        fitness[move.id].effectiveness = POKEDEX.types.totalEffectiveness(moveData.type, opponentData.types);
 
         fitness[move.id].stabby = playerData.types.includes(moveData.type) ? true : false;
 
         let effect = moveData.status ? true : false
         if (effect && this.state.player.lastMove != moveData.name) {
           if (!this.state.opponent.statusEffects.has(opponentData.name)) {
-            fitness[move.id].status = gens.get(generation).moves.get(moveData.name)?.secondaries?[0].chance : 0;
+            //Set % chance of inflicting status as a weight, if we don't already have a status effect on the opponent
+            fitness[move.id].status = POKEDEX.moves.get(moveData.name)?.secondaries?[0].chance : 0;
           }
         }
 
         // Use to prioritize a priority move that will kill
-        // if (gens.get(generation).moves.get(moveData.name)?.priority > 0){
-        // }
+        // if (POKEDEX.moves.get(moveData.name)?.priority > 0 && this.state.opponent.hpPercent < 20)
 
-        if (gens.get(generation).moves.get(moveData.name)?.recoil)
+        if (POKEDEX.moves.get(moveData.name)?.recoil)
         {
           fitness[move.id].recoil = true;
         }
@@ -496,7 +495,7 @@ class OffensiveAI extends RandomPlayerAI {
       // Calculate modified power considering STAB and type effectiveness
       let modifiedPower = 1;
 
-      modifiedPower *= gens.get(generation).types.totalEffectiveness(moveData.type, opponentData.types);
+      modifiedPower *= POKEDEX.types.totalEffectiveness(moveData.type, opponentData.types);
       
       if(modifiedPower >= 2) {
         //we have a super effective move, try to guess a switch in and go for a status move, if we have one

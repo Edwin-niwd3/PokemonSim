@@ -30,6 +30,9 @@ const WEIGHTS = {
         recoil: {
           weight: -5
         },
+        priority: {
+          weight: 15
+        },
         etc: {
           weight: 1
         }
@@ -197,6 +200,7 @@ class OffensiveAI extends RandomPlayerAI {
         active: null,
         moves: new Map(),
         statusEffects: new Map(),
+        hpPercent: 100,
       },
       turn: 0,
     };
@@ -257,6 +261,11 @@ class OffensiveAI extends RandomPlayerAI {
       if(line.includes('|turn|')){
         this.state.turn = parseInt(line.split('|')[2]);
       }
+      //Detect any changes in HP of active pokemon, look for / which is only used in hp
+      //Don't bother if the pokemon fainted
+      if ((line.includes('-damage') || line.includes('-heal')) && !line.includes('fnt')) {
+        this.handleHpChange(line);
+      }
 
       //Detect switches
       if (line.includes('|switch|')) {
@@ -286,6 +295,19 @@ class OffensiveAI extends RandomPlayerAI {
       let status = parts[3];
       let pokemonName = parts[2].slice(START_OF_NAME);
       this.recordStatus(pokemonName, status);
+    }
+  }
+
+  handleHpChange(line) {
+    const parts = line.split('|');
+    const affectedPlayer = parts[2].startsWith('p1a') || parts[2].startsWith('p1b') ? 'p1' : 'p2';
+    if (affectedPlayer !== this.playerId) {
+      //Only track opponent hp changes
+      const [currentHp, maxHp] = parts[3].split('/',2); // e.g., "100/200"
+      console.log('This is the hp Info: '+ currentHp + '/' + maxHp);
+      const hpPercent = (currentHp / maxHp) * 100;
+      console.log(`${this.playerId}'s opponent's active Pokémon HP: ${currentHp}/${maxHp} (${hpPercent.toFixed(2)}%)`);
+      this.state.opponent.hpPercent = hpPercent;
     }
   }
 
@@ -324,7 +346,7 @@ class OffensiveAI extends RandomPlayerAI {
 
   handleFaint(line) {
     const parts = line.split('|');
-    //someone fainted, check if it is out pokemon
+    //someone fainted, check if it is our pokemon
     if (!parts[2].includes(this.playerId))
     {
       return;
@@ -454,7 +476,9 @@ class OffensiveAI extends RandomPlayerAI {
         }
 
         // Use to prioritize a priority move that will kill
-        // if (POKEDEX.moves.get(moveData.name)?.priority > 0 && this.state.opponent.hpPercent < 20)
+        if (POKEDEX.moves.get(moveData.name)?.priority > 0 && this.state.opponent.hpPercent < 20) {
+          fitness[move.id].priority = true;
+        }
 
         if (POKEDEX.moves.get(moveData.name)?.recoil)
         {

@@ -204,6 +204,9 @@ class OffensiveAI extends RandomPlayerAI {
       },
       turn: 0,
     };
+    this._speciesCache = new Map();
+    this._moveCache = new Map();
+    this._types = POKEDEX.types;
 
     //Setup legend
     let key = 1
@@ -399,8 +402,8 @@ class OffensiveAI extends RandomPlayerAI {
   //Playstyles-----------------------------------------------------------------------------
   survivalPlaystyle(opponentMoves, activePokemon) {
     for (const moveName of opponentMoves) {
-        const moveTypes = POKEDEX.moves.get(moveName).type;
-        const pokemonTypes = POKEDEX.species.get(activePokemon)?.types;
+        const moveTypes = this.getMove(moveName)?.type;
+        const pokemonTypes = this.getSpecies(activePokemon)?.types;
         let max_effectiveness = 0;
         if( pokemonTypes){
           max_effectiveness = POKEDEX.types.totalEffectiveness(moveTypes, pokemonTypes);
@@ -411,7 +414,7 @@ class OffensiveAI extends RandomPlayerAI {
           let slot = 1;
           let swap = slot;
           for (const mon of this.teamJson) {
-            const type = POKEDEX.species.get(mon.species)?.types;
+            const type = this.getSpecies(mon.species)?.types;
             if (!type){
               continue;
             } 
@@ -457,39 +460,39 @@ class OffensiveAI extends RandomPlayerAI {
       moves.forEach((move) => {
         if (move.disabled) return;
         
-        const moveData = dex.moves.get(move.id);
+        const moveData = this.getMove(move.id);
+        //Some pokemon don't have proper data, so we need to use the original dex
         const opponentData = dex.species.get(this.state.opponent.active);
         const playerData = dex.species.get(this.state.player.active);
+        fitness[moveData.name] = {};
 
-        fitness[move.id] = {};
+        fitness[moveData.name].effectiveness = POKEDEX.types.totalEffectiveness(moveData.type, opponentData.types);
 
-        fitness[move.id].effectiveness = POKEDEX.types.totalEffectiveness(moveData.type, opponentData.types);
-
-        fitness[move.id].stabby = playerData.types.includes(moveData.type) ? true : false;
+        fitness[moveData.name].stabby = playerData.types.includes(moveData.type) ? true : false;
 
         let effect = moveData.status ? true : false
         if (effect && this.state.player.lastMove != moveData.name) {
           if (!this.state.opponent.statusEffects.has(opponentData.name)) {
             //Set % chance of inflicting status as a weight, if we don't already have a status effect on the opponent
-            fitness[move.id].status = POKEDEX.moves.get(moveData.name)?.secondaries?[0].chance : 0;
+            fitness[moveData.name].status = moveData?.secondaries?[0].chance : 0;
           }
         }
 
         // Use to prioritize a priority move that will kill
-        if (POKEDEX.moves.get(moveData.name)?.priority > 0 && this.state.opponent.hpPercent < 20) {
-          fitness[move.id].priority = true;
+        if (moveData.priority > 0 && this.state.opponent.hpPercent < 20) {
+          fitness[moveData.name].priority = true;
         }
 
-        if (POKEDEX.moves.get(moveData.name)?.recoil)
+        if (moveData?.recoil)
         {
-          fitness[move.id].recoil = true;
+          fitness[moveData.name].recoil = true;
         }
 
-        if (move.id === 'flail') {
-          fitness[move.id].bonus = 20;
+        if (moveData.name === 'flail') {
+          fitness[moveData.name].bonus = 20;
         }
 
-        totalfitness[move.id] = this.sumFitness(fitness[move.id]);
+        totalfitness[moveData.name] = this.sumFitness(fitness[moveData.name]);
       });
 
       const move = this.pickMoveByFitness(totalfitness)
@@ -545,7 +548,22 @@ class OffensiveAI extends RandomPlayerAI {
     */
   }
 
+  //Helpers for caching data if needed in future
+  getSpecies(name) {
+    if (!name) return null;
+    if (this._speciesCache.has(name)) return this._speciesCache.get(name);
+    const species = POKEDEX.species.get(name);
+    this._speciesCache.set(name, species);
+    return species;
+  }
 
+  getMove(name) {
+    if (!name) return null;
+    if (this._moveCache.has(name)) return this._moveCache.get(name);
+    const move = POKEDEX.moves.get(name);
+    this._moveCache.set(name, move);
+    return move;
+  }
 }
 
 const start = process.hrtime();

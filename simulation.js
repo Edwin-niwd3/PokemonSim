@@ -307,9 +307,7 @@ class OffensiveAI extends RandomPlayerAI {
     if (affectedPlayer !== this.playerId) {
       //Only track opponent hp changes
       const [currentHp, maxHp] = parts[3].split('/',2); // e.g., "100/200"
-      console.log('This is the hp Info: '+ currentHp + '/' + maxHp);
       const hpPercent = (currentHp / maxHp) * 100;
-      console.log(`${this.playerId}'s opponent's active Pokémon HP: ${currentHp}/${maxHp} (${hpPercent.toFixed(2)}%)`);
       this.state.opponent.hpPercent = hpPercent;
     }
   }
@@ -615,8 +613,8 @@ void (async () => {
     }
   }
 
-  generateReport(p1, p1spec.name);
-  generateReport(p2, p2spec.name);
+  //generateReport(p1, p1spec.name);
+  //generateReport(p2, p2spec.name);
   const end = process.hrtime(start);
   console.log(`Execution time: ${end[0]}s ${end[1]/1000000}ms`)
   console.log("\n-------------------------------------\n");

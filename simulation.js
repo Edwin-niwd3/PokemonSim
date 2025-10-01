@@ -1,9 +1,13 @@
 import {BattleStreams, Teams} from '@pkmn/sim';
 import { SinglesAI } from './singlesAI.js';
+import { DoublesAI } from './doublesAI.js';
+import {RandomPlayerAI, Dex} from '@pkmn/sim';
+import {Dex as pokeDex} from '@pkmn/dex';
+import {Generations} from "@pkmn/data";
+
 
 const streams = BattleStreams.getPlayerStreams(new BattleStreams.BattleStream());
-const spec = {formatid: 'gen9customgame'};
-
+const spec = {formatid: 'gen9vgc'};
 
 
 
@@ -137,15 +141,13 @@ const team1Json = [
    }
 ]
 
-
-
 const start = process.hrtime();
 
 const p1spec = {name: 'Bot 1', team: Teams.pack(team1Json)};
 const p2spec = {name: 'Bot 2', team: Teams.pack(team2Json)};
 
-const p1 = new SinglesAI(streams.p1, 'p1', team1Json);
-const p2 = new SinglesAI(streams.p2, 'p2', team2Json);
+const p1 = new DoublesAI(streams.p1, 'p1', team1Json);
+const p2 = new DoublesAI(streams.p2, 'p2', team2Json);
 
 void p1.start();
 void p2.start();

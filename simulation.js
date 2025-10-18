@@ -4,6 +4,9 @@ import { DoublesAI } from './doublesAI.js';
 import {RandomPlayerAI, Dex} from '@pkmn/sim';
 import {Dex as pokeDex} from '@pkmn/dex';
 import {Generations} from "@pkmn/data";
+import express from 'express';
+
+const app = express();
 
 
 const streams = BattleStreams.getPlayerStreams(new BattleStreams.BattleStream());

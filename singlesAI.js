@@ -103,7 +103,6 @@ export class SinglesAI extends RandomPlayerAI {
         }
       }
       //Agressive strategy: Choose the move with the highest base power
-      console.log('Trying aggresive playstyle')
       return this.aggresivePlaystyle(moves, request);
   }
 
@@ -269,15 +268,12 @@ export class SinglesAI extends RandomPlayerAI {
   //Playstyles-----------------------------------------------------------------------------
   survivalPlaystyle(opponentMoves, activePokemon) {
     for (const moveName of opponentMoves) {
-      console.log(`we ${this.playerId} are checking ${moveName}` )
         const moveTypes = this.getMove(moveName)?.type;
         const pokemonTypes = this.getSpecies(activePokemon)?.types;
         let max_effectiveness = 0;
         if( pokemonTypes){
           max_effectiveness = POKEDEX.types.totalEffectiveness(moveTypes, pokemonTypes);
         }
-
-        console.log('flag 1')
         
         if (pokemonTypes && max_effectiveness > 1) {
           //Look through each pokemon on our team and see who takes the least amount of dmg
@@ -296,7 +292,6 @@ export class SinglesAI extends RandomPlayerAI {
             }
             slot++;
           }
-          console.log('flag 2')
           if (this.state.player.activeIndex !== swap && this.fainted[swap] !== true) {
             this.state.player.activeIndex = swap
             console.log("Swapping!")

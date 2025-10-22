@@ -28,20 +28,25 @@ app.post('/simulation/begin', async (req, res) => {
   console.log('We started a battle')
 
   try {
-    const { team1Json, team2Json } = req.body;
-    console.log(team1Json, team2Json)
+    const { team1Json, team2Json, formatJson } = req.body;
+    console.log(team1Json, team2Json, formatJson)
 
     if (!team1Json || !team2Json) {
       return res.status(400).json({ error: 'Both teams are required.' });
     }
 
+    if(!formatJson) {
+      return res._construct(400).json({error: 'Format not selected'})
+    }
+
+
     const streams = BattleStreams.getPlayerStreams(new BattleStreams.BattleStream());
-    const spec = { formatid: 'gen9' };
+    const spec = { formatid: formatJson };
 
     const cleanedTeam1 = cleanTeam(team1Json);
     const cleanedTeam2 = cleanTeam(team2Json);
 
-    const validator = TeamValidator.get('gen9vgc2024regg');
+    const validator = TeamValidator.get(spec.formatid);
 
     const team1Errors = validator.validateTeam(team1Json);
     const team2Errors = validator.validateTeam(team2Json);
@@ -137,3 +142,83 @@ function generateBattleReport(player1, player2, player1Name = 'Player 1', player
   // Combine both players' reports into a single string
   return buildReport(player1, player1Name) + '\n' + buildReport(player2, player2Name);
 }
+
+//----------------------------------TESTING----------------------------------
+
+app.post('/simulation/abtest', async (req, res) => {
+  const { team1Json, team2Json, formatJson, numSimulations = 50 } = req.body;
+
+  if (!team1Json || !team2Json) {
+    return res.status(400).json({ error: 'Both teams are required.' });
+  }
+
+  if (!formatJson) {
+    return res.status(400).json({ error: 'Format not selected.' });
+  }
+
+  let results = { player1Wins: 0, player2Wins: 0, draws: 0 };
+  let durations = [];
+
+    const spec = { formatid: formatJson };
+
+    const validator = TeamValidator.get(spec.formatid);
+    const team1Errors = validator.validateTeam(team1Json);
+    const team2Errors = validator.validateTeam(team2Json);
+
+    if (team1Errors || team2Errors) {
+      console.log(`Validation error in simulation`);
+      return res.status(400).json({errorTeam1: team1Errors, errorTeam2: team2Errors});
+    }
+
+  for (let i = 0; i < numSimulations; i++) {
+    const start = process.hrtime();
+
+    const streams = BattleStreams.getPlayerStreams(new BattleStreams.BattleStream());
+
+
+    const p1spec = { name: 'Bot 1', team: Teams.pack(team1Json) };
+    const p2spec = { name: 'Bot 2', team: Teams.pack(team2Json) };
+
+    const p1 = new SinglesAI(streams.p1, 'p1', team1Json);
+    const p2 = new SinglesAI(streams.p2, 'p2', team2Json);
+
+    void p1.start();
+    void p2.start();
+
+    await streams.omniscient.write(`>start ${JSON.stringify(spec)}
+>player p1 ${JSON.stringify(p1spec)}
+>player p2 ${JSON.stringify(p2spec)}`);
+
+    let winner = null;
+
+    for await (const chunk of streams.omniscient) {
+      if (chunk.includes('|win|')) {
+        if (chunk.includes('Bot 1')) winner = 'p1';
+        else if (chunk.includes('Bot 2')) winner = 'p2';
+      }
+    }
+
+    const end = process.hrtime(start);
+    const durationMs = end[0] * 1000 + end[1] / 1_000_000;
+    durations.push(durationMs);
+
+    if (winner === 'p1') results.player1Wins++;
+    else if (winner === 'p2') results.player2Wins++;
+    else results.draws++;
+  }
+
+  const avgDuration = durations.reduce((a, b) => a + b, 0) / durations.length;
+
+  res.status(200).json({
+    message: `Ran ${numSimulations} simulations.`,
+    totalBattles: numSimulations,
+    ...results,
+    averageDurationMs: avgDuration.toFixed(2),
+    winRates: {
+      player1: ((results.player1Wins / numSimulations) * 100).toFixed(1) + '%',
+      player2: ((results.player2Wins / numSimulations) * 100).toFixed(1) + '%',
+      draws: ((results.draws / numSimulations) * 100).toFixed(1) + '%',
+    },
+  });
+});
+

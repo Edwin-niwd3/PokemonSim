@@ -48,7 +48,8 @@ app.post('/simulation/begin', async (req, res) => {
     
 
     if(team1Errors || team2Errors) {
-      return res.status(400).json({error: team1Errors + team2Errors})
+      console.log("Error in validating teams");
+      return res.status(400).json({errorTeam1: team1Errors, errorTeam2: team2Errors})
     }
 
     const p1spec = { name: 'Bot 1', team: Teams.pack(team1Json) };
@@ -60,7 +61,6 @@ app.post('/simulation/begin', async (req, res) => {
     void p1.start();
     void p2.start();
 
-    // ✅ Begin the battle
     await streams.omniscient.write(`>start ${JSON.stringify(spec)}
 >player p1 ${JSON.stringify(p1spec)}
 >player p2 ${JSON.stringify(p2spec)}`);

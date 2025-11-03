@@ -1,1 +1,19 @@
-node_modules
+
+# Node
+node_modules/
+dist/
+build/
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+python-ai/venv310
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

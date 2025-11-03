@@ -22,6 +22,18 @@ const WEIGHTS = {
             }[val];
           }
         },
+        recovery:{
+          weight: 5,
+          value: (val) => {
+            return {
+              0:0,
+              0.5:1,
+              1:2,
+              2:10,
+              4:20.
+            }[val];
+          }
+        },
         stab:{
           weight: 10
         },
@@ -58,6 +70,7 @@ export class SinglesAI extends RandomPlayerAI {
         status: null,
         activeIndex: 1,
         lastMove: null,
+        hpPercent: 100,
       },
       opponent: {
         pokemon: [],
@@ -177,6 +190,12 @@ export class SinglesAI extends RandomPlayerAI {
       const [currentHp, maxHp] = parts[3].split('/',2); // e.g., "100/200"
       const hpPercent = (currentHp / maxHp) * 100;
       this.state.opponent.hpPercent = hpPercent;
+    }
+    else {
+      //Track own hp changes
+      const [currentHp, maxHp] = parts[3].split('/', 2);
+      const hpPercent = (currentHp/maxHp) * 100;
+      this.state.player.hpPercent = hpPercent;
     }
   }
 
@@ -336,6 +355,11 @@ export class SinglesAI extends RandomPlayerAI {
 
         fitness[moveData.name].stabby = playerData.types.includes(moveData.type) ? true : false;
 
+        if (moveData.heal) {
+          console.log('This move heals!')
+          fitness[moveData.name].recovery = 15/(this.state.player.hpPercent/10)
+        }
+
         let effect = moveData.status ? true : false
         if (effect && this.state.player.lastMove != moveData.name) {
           if (!this.state.opponent.statusEffects.has(opponentData.name)) {
@@ -343,6 +367,8 @@ export class SinglesAI extends RandomPlayerAI {
             fitness[moveData.name].status = moveData?.secondaries?[0].chance : 0;
           }
         }
+
+        
 
         // Use to prioritize a priority move that will kill
         if (moveData.priority > 0 && this.state.opponent.hpPercent < 20) {

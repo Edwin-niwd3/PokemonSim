@@ -25,7 +25,7 @@ def train(total_timesteps=int(1e5)):
                 batch_size=64,
                 n_steps=2048,
                 ent_coef=0.01,
-                learning_rate=2.5e-4)
+                learning_rate=2.5e-3)
 
     model.learn(total_timesteps=total_timesteps)
     model.save(MODEL_PATH)

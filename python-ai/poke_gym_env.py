@@ -152,6 +152,7 @@ class PokeGymEnv(gym.Env):
               {"type":"switch","swap_in_slot":2}
         This mapping must be stored (and immutable) and the same mapping used during training + inference.
         """
+        
         raise NotImplementedError("Implement action mapping")
 
     # -------------------------

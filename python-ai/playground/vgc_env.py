@@ -1,5 +1,5 @@
 from poke_env.player.player import Player
-from poke_env.battle import AbstractBattle, Weather, Field, Observation, Status, move_category as MoveCategory
+from poke_env.battle import AbstractBattle, Weather, Field, Observation, Status, MoveCategory
 import numpy as np
 import gym
 

@@ -123,7 +123,7 @@ def single_agent_train():
     env_config = {"battle_format": "gen9randombattle"},
     disable_env_checking = True,
   )
-  config = config.learners(num_learners = 1, _enable_torch_distributed = False)
+  config = config.learners(num_learners = 1)
   config = config.rl_module(
     rl_module_spec = RLModuleSpec(
       module_class = ActorCriticModule,

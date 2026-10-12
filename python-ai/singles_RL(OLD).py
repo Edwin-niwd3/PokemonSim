@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 
 from gymnasium.spaces import Box, Discrete, Space
+from poke_env import AccountConfiguration
+from poke_env.data import GenData
 from ray.rllib.algorithms import PPOConfig
 from ray.rllib.core import Columns
 from ray.rllib.core.rl_module import RLModuleSpec
@@ -18,6 +20,12 @@ from poke_env.battle import AbstractBattle, Battle
 from poke_env.environment import SingleAgentWrapper, SinglesEnv
 from poke_env.player import RandomPlayer
 from poke_env.ps_client import LocalhostServerConfiguration
+
+GEN_DATA = GenData.from_gen(9)  # or 8 if you’re not using SV
+TYPE_CHART = GEN_DATA.type_chart
+
+
+MY_ACCOUNT_CONFIG = AccountConfiguration("my_username", None)
 
 class BeginnerEnv(SinglesEnv[npt.NDArray[np.float32]]):
   LOW = [-1,-1,-1,-1,0,0,0,0,0,0]
@@ -65,29 +73,42 @@ class BeginnerEnv(SinglesEnv[npt.NDArray[np.float32]]):
       battle, fainted_value = 2.0, hp_value = 1.0, victory_value = 30.0
     )
   
-  def embed_battle(self, battle:AbstractBattle):
+  def embed_battle(self, battle: AbstractBattle):
     assert isinstance(battle, Battle)
-    #-1 means the move has no base power or is not available
-    moves_base_power = -np.ones(4) 
-    moves_dmg_multiplier = np.ones(4)
+
+    moves_base_power = -np.ones(4, dtype=np.float32)
+    moves_dmg_multiplier = np.ones(4, dtype=np.float32)
+
+    opponent = battle.opponent_active_pokemon
+
     for i, move in enumerate(battle.available_moves):
-      moves_base_power[i] = (move.base_power/100)
-      if battle.opponent_active_pokemon is not None:
-        moves_dmg_multiplier[i] = move.type.damage_multiplier(
-          battle.opponent_active_pokemon.type_1,
-          battle.opponent_active_pokemon.type_1,
-          type_chart = battle.opponent_active_pokemon.type_chart,
-        )
-    fainted_mon_team = len([mon for mon in battle.team.values() if mon.fainted])/ 6
-    fainted_mon_opponent = len([mon for mon in battle.opponent_team.values() if mon.fainted])/6
+        moves_base_power[i] = move.base_power / 100
+
+        if opponent is not None and move.type is not None:
+            if opponent.type_2 is None:
+                # Monotype
+                moves_dmg_multiplier[i] = move.type.damage_multiplier(
+                    opponent.type_1,
+                    type_chart = TYPE_CHART,
+                )
+            else:
+                # Dual-type
+                moves_dmg_multiplier[i] = move.type.damage_multiplier(
+                    opponent.type_1,
+                    opponent.type_2,
+                    type_chart = TYPE_CHART,
+                )
+
+    fainted_mon_team = sum(mon.fainted for mon in battle.team.values()) / 6
+    fainted_mon_opponent = sum(mon.fainted for mon in battle.opponent_team.values()) / 6
 
     final_vector = np.concatenate([
-      moves_base_power,
-      moves_dmg_multiplier,
-      [fainted_mon_team, fainted_mon_opponent],
-      ]
-    )
-    return np.float32(final_vector)
+        moves_base_power,
+        moves_dmg_multiplier,
+        [fainted_mon_team, fainted_mon_opponent],
+    ])
+
+    return final_vector
   
 class ActorCriticModule(TorchRLModule, ValueFunctionAPI):
   def __init__(
@@ -130,15 +151,12 @@ def single_agent_train():
       env_config={"battle_format": "gen9randombattle"},
       disable_env_checking=True,
   )
-
-  # ❌ REMOVE: not supported in 2.5.1
   # config = config.learners(num_learners=1)
 
-  # ✅ Required to avoid torch distributed on Windows
+
   config = config.framework("torch")
   config = config.resources(num_gpus=0)
 
-  # ✅ New API (Ray 2.5.1)
   config = config.env_runners(
       num_env_runners=0,    # IMPORTANT: no remote workers
       num_envs_per_env_runner=1

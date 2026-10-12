@@ -1,6 +1,7 @@
 import {BattleStreams, Teams, TeamValidator} from '@pkmn/sim';
 import { SinglesAI } from './singlesAI.js';
 import { DoublesAI } from './doublesAI.js';
+import {SinglesVsRandom} from './Testing.js';
 import {RandomPlayerAI, Dex} from '@pkmn/sim';
 import {Dex as pokeDex} from '@pkmn/dex';
 import {Generations} from "@pkmn/data";
@@ -221,4 +222,5 @@ app.post('/simulation/abtest', async (req, res) => {
     },
   });
 });
+
 

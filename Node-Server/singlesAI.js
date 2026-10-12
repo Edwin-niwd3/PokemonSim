@@ -34,8 +34,11 @@ const WEIGHTS = {
             }[val];
           }
         },
+        damage: {
+          weight: 1
+        },
         stab:{
-          weight: 10
+          weight: 30
         },
         status: {
           weight:10
@@ -62,7 +65,7 @@ export class SinglesAI extends RandomPlayerAI {
     this.fainted = []
     this.legend = new Map();
     this.weights = WEIGHTS;
-    this.randomnessExponent = 1;
+    this.randomnessExponent = 10;
     this.state = {
       player: {
         //TODO: Keep track of if we have a substitute or not
@@ -95,11 +98,55 @@ export class SinglesAI extends RandomPlayerAI {
 
   }
     //TOOLS-----------------------------------------------------------------------------
+    receive(chunk) {
+      this.updateState(chunk);
+      super.receive(chunk);
+    }
+
+    chooseSwitch(active, switches)
+    {
+      const opponent = this.getSpecies(this.state.opponent.active);
+      if(!opponent) return switches[0].slot;
+
+      let bestSlot = switches[0].slot;
+      let bestScore = -Infinity;
+      for (const {slot, pokemon} of switches) {
+        const speciesName = pokemon.details.split(',')[0];
+        const candidate = this.getSpecies(speciesName);
+        let offensiveScore = 0;
+        let defensiveScore = 0;
+        if (!candidate) continue;
+        for (const moveName of this.state.opponent.moves.get(this.state.opponent.active) || []) {
+          const move = this.getMove(moveName);
+          if (!move) continue;
+          const TempdefensiveScore = this.estimateDamage(move, opponent, candidate);
+          if (TempdefensiveScore > defensiveScore) {
+            defensiveScore = TempdefensiveScore;
+          }
+        }
+        for(const move of pokemon.moves) {
+          const moveData = this.getMove(move);
+          if (!moveData) continue;
+          const TempoffensiveScore = this.estimateDamage(moveData, candidate, opponent);
+          if (TempoffensiveScore > offensiveScore) {
+            offensiveScore = TempoffensiveScore;
+          }
+        }
+        const totalScore = offensiveScore - defensiveScore;
+        if (totalScore > bestScore) {
+          bestScore = totalScore;
+          bestSlot = slot;
+        }
+      }
+      return bestSlot;
+    }
+
     chooseMove(request) {
       const moves = request.moves;
       
       //Play slower, survive longer, gather more intel
-      if (this.state.turn <= 3) {
+      let scouting = false;
+      if (this.state.turn <= 3 && scouting) {
         if (this.scoutingPlaystyle(moves)){
           return this.scoutingPlaystyle(moves);
         }
@@ -118,6 +165,13 @@ export class SinglesAI extends RandomPlayerAI {
       //Agressive strategy: Choose the move with the highest base power
       return this.aggresivePlaystyle(moves, request);
   }
+
+  estimateDamage(moveData, attackerData, DefenderData)
+  {
+    return moveData.basePower * (moveData.category === 'Physical' ? (attackerData.baseStats.atk / DefenderData.baseStats.def) : (attackerData.baseStats.spa / DefenderData.baseStats.spd)) * POKEDEX.types.totalEffectiveness(moveData.type, DefenderData.types) * (attackerData.types.includes(moveData.type) ? 1.5 : 1);
+  }
+
+
 
   recordMove(pokemon, move) {
     if (!this.state.opponent.moves.has(pokemon)) {
@@ -346,6 +400,10 @@ export class SinglesAI extends RandomPlayerAI {
         if (move.disabled) return;
         
         const moveData = this.getMove(move.id);
+        if (!moveData) {
+          console.error(`Move data not found for move: ${move.id}`);
+          return;
+        }
         //Some pokemon don't have proper data, so we need to use the original dex
         const opponentData = dex.species.get(this.state.opponent.active);
         const playerData = dex.species.get(this.state.player.active);
@@ -353,10 +411,11 @@ export class SinglesAI extends RandomPlayerAI {
 
         fitness[moveData.name].effectiveness = POKEDEX.types.totalEffectiveness(moveData.type, opponentData.types);
 
-        fitness[moveData.name].stabby = playerData.types.includes(moveData.type) ? true : false;
+        fitness[moveData.name].stab = playerData.types.includes(moveData.type) ? true : false;
+
+        fitness[moveData.name].damage = this.estimateDamage(moveData, playerData, opponentData);
 
         if (moveData.heal) {
-          console.log('This move heals!')
           fitness[moveData.name].recovery = 15/(this.state.player.hpPercent/10)
         }
 
@@ -370,7 +429,7 @@ export class SinglesAI extends RandomPlayerAI {
 
         
 
-        // Use to prioritize a priority move that will kill
+        // Used to prioritize a priority move that will kill
         if (moveData.priority > 0 && this.state.opponent.hpPercent < 20) {
           fitness[moveData.name].priority = true;
         }
@@ -393,7 +452,12 @@ export class SinglesAI extends RandomPlayerAI {
         return `move ${move}`
       }
       else {
-        return super.choose(request)
+        //Just choose the first active move if we can't find a good one
+        for (let i = 0; i < moves.length; i++) {
+          const move = moves[i];
+          if (move.disabled) continue;
+          return `move ${i + 1}`;
+        }
       }
     
     /*

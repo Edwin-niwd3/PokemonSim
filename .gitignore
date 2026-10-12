@@ -17,3 +17,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Bench output
+Node-Server/losses/

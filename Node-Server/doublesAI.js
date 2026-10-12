@@ -1,228 +1,238 @@
-import {RandomPlayerAI, Dex} from '@pkmn/sim';
+import {RandomPlayerAI} from '@pkmn/sim';
 import {Dex as pokeDex} from '@pkmn/dex';
-import {Generations} from "@pkmn/data";
+import {Generations} from '@pkmn/data';
 
-const spec = {formatid: 'gen9customgame'};
-const gens = new Generations(pokeDex)
-const generation = gens.get(spec.formatid).num
-const POKEDEX = gens.get(generation);
-const dex = Dex.forFormat(spec.formatid);
+const POKEDEX = new Generations(pokeDex).get(9);
 
-
-const WEIGHTS = {
-        effectiveness : {
-          weight: 10,
-          value: (val) => {
-            return {
-              0:0,
-              0.5:1,
-              1:2,
-              2:10,
-              4:20
-            }[val];
-          }
-        },
-        stab:{
-          weight: 10
-        },
-        status: {
-          weight:10
-        },
-        recoil: {
-          weight: -5
-        },
-        priority: {
-          weight: 15
-        },
-        etc: {
-          weight: 1
-        }
-      };
-
-export class DoublesAI extends RandomPlayerAI {
-  constructor(playerStream, playerId, teamJson) {
-    super(playerStream);
-    this.playerId = playerId;
-    // store a deep copy of the provided team JSON so each AI has its own immutable copy
-    this.teamJson = teamJson ? JSON.parse(JSON.stringify(teamJson)) : [];
-    // also keep the packed team string the simulator uses (if needed elsewhere)
-    this.team = this.teamJson;
-    this.fainted = []
-    this.legend = new Map();
-    this.weights = WEIGHTS;
-    this.randomnessExponent = 1;
-    this.state = {
-      player: {
-        //keep track of current active pokemon in a map, where each slot, ex: p1a, p1b, maps to the pokemon name
-        active: new Map([[`${this.playerId}a`, ''], [`${this.playerId}b`, '']]),
-        status: null,
-        activeIndex: 1,
-        lastMove: null,
-      },
-      opponent: {
-        pokemon: [],
-        active: null,
-        moves: new Map(),
-        statusEffects: new Map(),
-        hpPercent: 100,
-      },
-      turn: 0,
-    };
+export class DoublesAI_v2 extends RandomPlayerAI {
+  constructor(stream, id, team) {
+    super(stream);
+    this.playerId = id;
+    this.team = team;
+    this.request = null;
+    this.randomnessExponent = 10;
     this._speciesCache = new Map();
     this._moveCache = new Map();
-    this._types = POKEDEX.types;
+    this.lastChoice = {};
+    this.state = {
+      turn: 0,
+      slots: new Map(),
+    };
+  }
+  receive(chunk) {
+  this.updateState(chunk);
+  super.receive(chunk);
+}
+  chooseMove(active, moves) {
+    //Figure out which slot is active, and which is the partner
+    const index = this.request.active.indexOf(active);
+    const mySlot = `${this.playerId}${index === 0 ? 'a': 'b'}`;
+    const partnerSlot = `${this.playerId}${index === 0 ? 'b': 'a'}`;
 
-    //Setup legend
-    let key = 1
-    for (const mon of this.teamJson) {
-      this.legend.set(mon.species, key);
-      this.fainted.push(false)
-      key++;
+    //Figure out what pokemon I am, and the enemy
+    const foeId = this.playerId === 'p1' ? 'p2' : 'p1';
+    const myRecord = this.state.slots.get(mySlot);
+    const me = myRecord ? { record: myRecord, species: this.getSpecies(myRecord.species) } : null;
+    const partnerRecord = this.state.slots.get(partnerSlot);
+    const partner = partnerRecord ? { record: partnerRecord, species: this.getSpecies(partnerRecord.species) } : null;
+
+    //Foes[0] is the first enemy, foes[1] is the second enemy
+    const foes = ['a', 'b'].map(letter => {
+      const record = this.state.slots.get(`${foeId}${letter}`);
+      if(!record || record.hp <= 0) return null;
+      return {record, species: this.getSpecies(record.species) };
+    });
+
+    if(!me?.species || foes.every(f => f === null)) {
+      return moves[0].choice;
     }
 
-  }
-    //TOOLS-----------------------------------------------------------------------------
-    chooseMove(request) {
-      const moves = request.moves;
-      
-      //Play slower, survive longer, gather more intel
-      if (this.state.turn <= 3) {
-        return this.scoutingPlaystyle(moves);
+    const SINGLE = ['normal', 'any', 'adjacentFoe'];
+    const SPREAD = ['allAdjacentFoes', 'allAdjacent'];
+    const SPREAD_MOD = 0.75; //Spread moves do 75% damage to each target
+    const UTILITY_SCORE = 15; //Utility moves are given a score of 20
+    const KO_BONUS = 40;
+
+    const candidates = [] // {choice, score}
+    for (const entry of moves) { 
+      const moveData = this.getMove(entry.move.move);
+      if(!moveData) continue;
+      const kind = entry.move.target;
+      const slot = entry.move.slot;
+
+      //protect type move
+      if(moveData.id === 'protect' || moveData.id === 'detect') {
+        //Utility move, add to candidates with a score of 20
+        const incoming = this.estimateIncoming(me, foes);
+        const threatened = incoming >= me.record.hp;
+        let score = threatened ? 60 : UTILITY_SCORE;
+        if (this.lastChoice?.[mySlot] === 'protect') score = 5;
+        candidates.push({choice: entry.choice, score, id: moveData.id});
+        continue;
       }
-      //If the opponent has a super effective move against us, that we know about, try switching to a pkmn with type advantage.
-      const activeOpponent = this.state.opponent.active;
-      const opponentMoves = this.state.opponent.moves.get(activeOpponent);
-      const activePokemon = this.state.player.active;
-
-      //If we know the opponent moves, check them all to make sure they can't hit us with a super effective
-      if (opponentMoves) {
-        this.survivalPlaystyle(opponentMoves, activePokemon);
+      //General Utility move
+      if (moveData.basePower === 0 || !(SINGLE.includes(kind) || SPREAD.includes(kind))) {
+        candidates.push({choice: entry.choice, score: UTILITY_SCORE, id: moveData.id});
+        continue;
       }
-      //Agressive strategy: Choose the move with the highest base power
-      return this.aggresivePlaystyle(moves, request);
-  }
-
-  recordMove(pokemon, move) {
-    if (!this.state.opponent.moves.has(pokemon)) {
-      this.state.opponent.moves.set(pokemon, new Set());
+      //Single target move
+      if (SINGLE.includes(kind)) {
+        let best = -Infinity, target = 0;
+        foes.forEach((foe, i) => {
+          if (!foe) return;
+          const pct = this.estimatePercent(moveData, me, foe);
+          const ko = pct >= foe.record.hp;
+          const value = Math.min(pct, foe.record.hp) + (ko ? KO_BONUS: 0);
+          if( value > best) { best = value; target = i + 1;}
+        });
+        if (target) candidates.push({choice: `move ${slot} ${target}`, score: best, id: moveData.id});
+        continue;
+      }
+      //Spread target move
+      if (SPREAD.includes(kind)) {
+        let total = 0;
+        for(const foe of foes){
+            if(!foe) continue;
+            const pct = this.estimatePercent(moveData, me, foe) * SPREAD_MOD;
+            total += Math.min(pct, foe.record.hp) + (pct >= foe.record.hp? KO_BONUS : 0);
+          }
+          if(kind === "allAdjacent" && partner?.species) {
+            total -= this.estimatePercent(moveData, me, partner) * SPREAD_MOD;
+          }
+          candidates.push({choice: `move ${slot}`, score: total, id:moveData.id})
+      }
     }
-
-    const knownMoves = this.state.opponent.moves.get(pokemon);
-    knownMoves.add(move);
-
-  }
-
-  recordStatus(pokemon, status) { 
-    if(!this.state.opponent.statusEffects.has(pokemon)) {
-      this.state.opponent.statusEffects.set(pokemon, status);
-    }
-
-    let knownStatus = this.state.opponent.statusEffects.get(pokemon);
-    knownStatus = status;
+    if (!candidates.length) return moves[0].choice;
+    let scores = candidates.map(c=> c.score);
+    const pick = this.pickMoveByFitness(scores);
+    const choesn = pick === false ? candidates[0]: candidates[pick];
+    this.lastChoice[mySlot] = choesn.id;
+    return choesn.choice;
   }
 
   updateState(chunk) {
-    const lines = chunk.split('\n');
-    for (const line of lines) {
-      //Manage what turn it is
-      if(line.includes('|turn|')){
-        this.state.turn = parseInt(line.split('|')[2]);
+    for(const line of chunk.split('\n')) {
+      const parts = line.split('|');
+      switch(parts[1]) {
+        case 'turn':  this.state.turn = Number(parts[2]); break;
+        case 'drag': 
+        case 'replace': 
+        case 'switch': this.handleSwitch(parts); break;
+        case 'move': this.handleMove(parts); break;
+        case 'faint': this.handleFaint(parts); break;
+        case '-damage':
+        case '-heal':
+        case '-sethp': this.handleHpChange(parts); break;
+        case '-status': this.handleStatusChange(parts); break;
+        case '-curestatus': this.handleStatusChange(parts, true); break;
       }
-      //Detect any changes in HP of active pokemon, look for / which is only used in hp
-      //Don't bother if the pokemon fainted
-      if ((line.includes('-damage') || line.includes('-heal')) && !line.includes('fnt')) {
-        this.handleHpChange(line);
-      }
+    }
+  }
+  receiveRequest(request) {
+    this.request = request;
+    super.receiveRequest(request);
+  }
+//Handlers-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  handleSwitch(parts) {
+    const ident = this.parseIdent(parts[2]);
+    if (!ident) return;
+    const details = parts[3].split(',').map( s=> s.trim());
+    const species = details[0];
+    const level = Number((details.find(d => /^L\d+$/.test(d)) ?? 'L100').slice(1));
+    this.state.slots.set(ident.slot, {
+      species,
+      hp: 100,
+      status: null,
+      moves: new Set(),
+      level: level,
+    });
+  }
+  handleMove(parts) {
+    const ident = this.parseIdent(parts[2]);
+    if (!ident) return;
+    const move = parts[3].split(',')[0];
+    const slotState = this.state.slots.get(ident.slot);
+    if (slotState) {
+      slotState.moves.add(move);
+    }
+  }
 
-      //Detect switches
-      if (line.includes('|switch|')) {
-        this.handleSwitch(line);
-      }
+  handleHpChange(parts) {
+    const ident = this.parseIdent(parts[2]);
+    if (!ident) return;
+    const condition = parts[3];
+    let hp;
+    if(condition.startsWith('0 fnt')) {
+      hp = 0;
+    } else {
+      const [current, rest] = condition.split('/');
+      const max = rest.split(' ')[0];
+      hp = (Number(current)/Number(max)) * 100;
+    }
+    const slotState = this.state.slots.get(ident.slot);
+    if (slotState) {
+      slotState.hp = hp;
+    }
+  }
 
-      //Detect moves used by the opponent
-      if (line.includes('|move|')){
-        this.handleMove(line);
+  handleStatusChange(parts, cure = false) {
+    if(cure){
+      const ident = this.parseIdent(parts[2]);
+      if (!ident) return;
+      const slotState = this.state.slots.get(ident.slot);
+      if (slotState) {
+        slotState.status = null;
       }
-
-      if (line.includes('fnt')) {
-       this.handleFaint(line); 
-      }
-      if (line.includes('-status')) {
-        this.handleStatus(line);
+    }
+    else {
+      const ident = this.parseIdent(parts[2]);
+      if (!ident) return;
+      const status = parts[3];
+      const slotState = this.state.slots.get(ident.slot);
+      if (slotState) { 
+        slotState.status = status;
       }
     }
   }
 
-  handleStatus(line) {
-    const parts = line.split('|');
-    const switchedPlayer = parts[2].startsWith('p1a') || parts[1].startsWith('p1b') ? 'p1' : 'p2';
-    if (switchedPlayer !== this.playerId) { 
-      //parts[3] holds what status effect the pokemon has
-      const START_OF_NAME = 5;
-      let status = parts[3];
-      let pokemonName = parts[2].slice(START_OF_NAME);
-      this.recordStatus(pokemonName, status);
+  handleFaint(parts) {
+    // Handle faint logic for doubles battles
+    // This is a placeholder for actual faint handling logic
+    const ident = this.parseIdent(parts[2]);
+    if (!ident) return;
+    const slotState = this.state.slots.get(ident.slot);
+    if (slotState) { 
+      slotState.hp = 0;
     }
   }
 
-  handleHpChange(line) {
-    const parts = line.split('|');
-    const affectedPlayer = parts[2].startsWith('p1a') || parts[2].startsWith('p1b') ? 'p1' : 'p2';
-    if (affectedPlayer !== this.playerId) {
-      //Only track opponent hp changes
-      const [currentHp, maxHp] = parts[3].split('/',2); // e.g., "100/200"
-      const hpPercent = (currentHp / maxHp) * 100;
-      this.state.opponent.hpPercent = hpPercent;
-    }
+  //Tools-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  parseIdent(ident) {
+    const name = ident.split(':')[0];
+    if(name.length !==3) return null;
+    return {slot: name, player: name.slice(0,2) };
   }
 
-  handleSwitch(line) {
-    //Someone has switched pokemon, check if its the opponent
-        const parts = line.split('|');
-        const switchedPlayer = parts[2].split(':')[0];
-        console.log(switchedPlayer)
+  getSpecies(name) {
+    if (!name) return null;
+    if (this._speciesCache.has(name)) return this._speciesCache.get(name);
+    const species = POKEDEX.species.get(name);
+    this._speciesCache.set(name, species);
+    return species;
   }
 
-  handleMove(line) {
-    const parts = line.split('|');
-    //someone used a move, check if its the opponent
-    const movingPlayer = parts[2].startsWith('p1a') || parts[2].startsWith('p1b') ? 'p1' : 'p2';
-    if(movingPlayer !== this.playerId) {
-      const moveName = parts[3];
-      this.recordMove(this.state.opponent.active, moveName);
-    }
+  getMove(name) {
+    if (!name) return null;
+    if (this._moveCache.has(name)) return this._moveCache.get(name);
+    const move = POKEDEX.moves.get(name);
+    this._moveCache.set(name, move);
+    return move;
   }
-
-  handleFaint(line) {
-    const parts = line.split('|');
-    //someone fainted, check if it is our pokemon
-    if (!parts[2].includes(this.playerId))
-    {
-      return;
-    }
-    //Otherwise, figure out what pokemon fainted
-    const START_OF_NAME = 5
-    const faintingPokemon = parts[2].slice(START_OF_NAME);
-    const key = this.legend.get(faintingPokemon);
-    this.fainted[key] = true
+  estimateDamage(moveData, attackerData, DefenderData)
+  {
+    return moveData.basePower * (moveData.category === 'Physical' ? (attackerData.baseStats.atk / DefenderData.baseStats.def) : (attackerData.baseStats.spa / DefenderData.baseStats.spd)) * POKEDEX.types.totalEffectiveness(moveData.type, DefenderData.types) * (attackerData.types.includes(moveData.type) ? 1.5 : 1);
   }
-
-  sumFitness(obj) {
-    let sum = 0;
-    for (const key in obj) {
-      if (this.weights[key]) {
-        // run the value function if it exists;
-        // else, convert the value to a number and use that.
-        const value = this.weights[key].value
-          ? this.weights[key].value(obj[key])
-          : +obj[key];
-
-        sum = sum + this.weights[key].weight * value;
-      }
-    }
-    return sum;
-  }
-   pickMoveByFitness(moveArr) {
+  pickMoveByFitness(moveArr) {
     let total = 0;
     const weighted = {};
     for (const move in moveArr) {
@@ -245,169 +255,40 @@ export class DoublesAI extends RandomPlayerAI {
     return false;
   }
 
-  //Playstyles-----------------------------------------------------------------------------
-  survivalPlaystyle(opponentMoves, activePokemon) {
-    for (const moveName of opponentMoves) {
-        const moveTypes = this.getMove(moveName)?.type;
-        const pokemonTypes = this.getSpecies(activePokemon)?.types;
-        let max_effectiveness = 0;
-        if( pokemonTypes){
-          max_effectiveness = POKEDEX.types.totalEffectiveness(moveTypes, pokemonTypes);
-        }
-        
-        if (pokemonTypes && max_effectiveness > 1) {
-          //Look through each pokemon on our team and see who takes the least amount of dmg
-          let slot = 1;
-          let swap = slot;
-          for (const mon of this.teamJson) {
-            const type = this.getSpecies(mon.species)?.types;
-            if (!type){
-              continue;
-            } 
-
-            let effectiveness = POKEDEX.types.totalEffectiveness(moveTypes, type);
-            if (effectiveness < max_effectiveness) {
-              swap = slot;
-              max_effectiveness = effectiveness;
-            }
-            slot++;
-          }
-          if (this.state.player.activeIndex !== swap && this.fainted[swap] !== true) {
-            this.state.player.activeIndex = swap
-            console.log("Swapping!")
-            return `switch ${swap}`
-          }
-        }
-    }
+  statAt(base, level, isHp = false)
+  {
+    const core = Math.floor((2 * base + 31 + 21) * level/100);
+    return isHp ? core + level + 10 : core + 5;
   }
 
-  scoutingPlaystyle(moves) {
-    //Prioritize survival moves if available
-      const survivalMoves = ['protect', 'substitute', 'roost', 'wish'];
-      for (let i = 0; i < moves.length; i++) {
-        const move = moves[i];
-        if (move.disabled) continue;
-        if (survivalMoves.includes(move.id)) {
-          // If Protect was used last turn, avoid using it again immediately
-          if (move.id === this.lastMove) {
-            continue;
-          }
-          //If we use protect this turn, set the flag to true, otherwise reset it
-          this.lastMove = moves[i];
-          return `move ${i + 1}`;
-        }
+  estimatePercent(moveData, attacker, defender) {
+    if(!moveData.basePower) return 0;
+    const physical = moveData.category === 'Physical';
+    const atk = this.statAt(physical ? attacker.species.baseStats.atk : attacker.species.baseStats.spa, attacker.record.level);
+    const def = this.statAt(physical ? defender.species.baseStats.def : defender.species.baseStats.spd, defender.record.level);
+    const hp = this.statAt(defender.species.baseStats.hp, defender.record.level, true);
+
+    let damage = Math.floor(Math.floor(2 * attacker.record.level / 5 + 2) * moveData.basePower * atk / def / 50) + 2;
+    damage *= .925; //Damage Roll
+    damage *= attacker.species.types.includes(moveData.type) ? 1.5 : 1; // Stab
+    damage *= POKEDEX.types.totalEffectiveness(moveData.type, defender.species.types);
+    return damage/hp* 100;
+  }
+  
+  estimateIncoming(me, foes) {
+    let max = new Array(2).fill(0);
+    let total = 0;
+    foes.forEach((foe, i) => {
+      if (!foe) return;
+      for (const move of foe.record.moves) {
+        const moveData = this.getMove(move);
+        if(!moveData || moveData.basePower === 0) continue;
+        const percent = this.estimatePercent(moveData, foe, me);
+        if(percent > max[i]) max[i] = percent;
       }
+    });
+    total = max[0] + max[1];
+    return total;
   }
 
-  aggresivePlaystyle(moves, request) {
-      const fitness = {};
-      const totalfitness = {};
-      //Setup the fitness score of each move
-      moves.forEach((move) => {
-        if (move.disabled) return;
-        
-        const moveData = this.getMove(move.id);
-        //Some pokemon don't have proper data, so we need to use the original dex
-        const opponentData = dex.species.get(this.state.opponent.active);
-        const playerData = dex.species.get(this.state.player.active);
-        fitness[moveData.name] = {};
-
-        fitness[moveData.name].effectiveness = POKEDEX.types.totalEffectiveness(moveData.type, opponentData.types);
-
-        fitness[moveData.name].stabby = playerData.types.includes(moveData.type) ? true : false;
-
-        let effect = moveData.status ? true : false
-        if (effect && this.state.player.lastMove != moveData.name) {
-          if (!this.state.opponent.statusEffects.has(opponentData.name)) {
-            //Set % chance of inflicting status as a weight, if we don't already have a status effect on the opponent
-            fitness[moveData.name].status = moveData?.secondaries?[0].chance : 0;
-          }
-        }
-
-        // Use to prioritize a priority move that will kill
-        if (moveData.priority > 0 && this.state.opponent.hpPercent < 20) {
-          fitness[moveData.name].priority = true;
-        }
-
-        if (moveData?.recoil)
-        {
-          fitness[moveData.name].recoil = true;
-        }
-
-        if (moveData.name === 'flail') {
-          fitness[moveData.name].bonus = 20;
-        }
-
-        totalfitness[moveData.name] = this.sumFitness(fitness[moveData.name]);
-      });
-
-      const move = this.pickMoveByFitness(totalfitness)
-      if (move) {
-        this.lastMove = move;
-        return `move ${move}`
-      }
-      else {
-        return super.choose(request)
-      }
-    
-    /*
-    ------------------------------OLD STRATEGY FOR CHOOSING MOVE--------------------------------------------
-    let bestMoveIndex = -1;
-    let maxPower = -1;
-    const STAB_BONUS = 1.5; // 50% bonus for STAB moves
-    const EFFECTIVNESS = 2; // 100% bonus for super effective moves
-
-    for (let i = 0; i < moves.length; i++) {
-      const move = moves[i];
-      if (move.disabled) continue;
-      const moveData = dex.moves.get(move.id);
-      const opponentData = dex.species.get(this.state.opponent.active);
-      const playerData = dex.species.get(this.state.player.active);
-      let power = moveData.basePower;
-
-      // Calculate modified power considering STAB and type effectiveness
-      let modifiedPower = 1;
-
-      modifiedPower *= POKEDEX.types.totalEffectiveness(moveData.type, opponentData.types);
-      
-      if(modifiedPower >= 2) {
-        //we have a super effective move, try to guess a switch in and go for a status move, if we have one
-        
-      }
-
-      if (playerData.types.includes(moveData.type)) {
-        modifiedPower *= STAB_BONUS;
-      }
-      power *= modifiedPower;
-      if (power > maxPower) {
-        maxPower = modifiedPower;
-        bestMoveIndex = i + 1;
-      }
-    }
-    
-    if (bestMoveIndex !== -1) {
-      return `move ${bestMoveIndex}`;
-    } else {
-    // Fallback to a random move if no offensive move is found
-    return super.chooseMove(request);
-    }
-    */
-  }
-
-  //Helpers for caching data if needed in future
-  getSpecies(name) {
-    if (!name) return null;
-    if (this._speciesCache.has(name)) return this._speciesCache.get(name);
-    const species = POKEDEX.species.get(name);
-    this._speciesCache.set(name, species);
-    return species;
-  }
-
-  getMove(name) {
-    if (!name) return null;
-    if (this._moveCache.has(name)) return this._moveCache.get(name);
-    const move = POKEDEX.moves.get(name);
-    this._moveCache.set(name, move);
-    return move;
-  }
 }

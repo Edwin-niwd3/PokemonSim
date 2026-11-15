@@ -11,7 +11,7 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.urlencoded({extended: true}));
 app.use(express.json());
-app.use(cors());
+app.use(cors({origin: ['https://pokesim.edwinapp.org', 'http://localhost:5173']}));
 
 app.get('/', (req, res) => {
   res.status(200).send('Simulation API is running!')
@@ -311,7 +311,7 @@ app.post('/simulation/abtest', async (req, res) => {
     return res.status(400).json({ error: 'Format not selected.' });
   }
 
-  if (!Number.isInteger(numSimulations) || numSimulations <= 0 || numSimulations > 500) {
+  if (!Number.isInteger(numSimulations) || numSimulations <= 0 || numSimulations > 500) { 
     return res.status(400).json({ error: 'Number of simulations must be an integer between 1 and 500.' });
   }
 

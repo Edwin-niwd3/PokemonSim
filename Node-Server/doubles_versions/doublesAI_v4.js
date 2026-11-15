@@ -4,7 +4,15 @@ import {Generations} from '@pkmn/data';
 
 const POKEDEX = new Generations(pokeDex).get(9);
 
-export class DoublesAI_v2 extends RandomPlayerAI {
+const SINGLE = ['normal', 'any', 'adjacentFoe'];
+const SPREAD = ['allAdjacentFoes', 'allAdjacent'];
+const SPREAD_MOD = 0.75; //Spread moves do 75% damage to each target
+const UTILITY_SCORE = 15; //Utility moves are given a score of 20
+const KO_BONUS = 40;
+const SWITCH_COST = 5;
+const DEATH_PENALTY = 100;
+
+export class DoublesAI_v4 extends RandomPlayerAI {
   constructor(stream, id, team) {
     super(stream);
     this.playerId = id;
@@ -17,6 +25,7 @@ export class DoublesAI_v2 extends RandomPlayerAI {
     this.state = {
       turn: 0,
       slots: new Map(),
+      roster: new Map(),
     };
   }
   receive(chunk) {
@@ -37,21 +46,12 @@ export class DoublesAI_v2 extends RandomPlayerAI {
     const partner = partnerRecord ? { record: partnerRecord, species: this.getSpecies(partnerRecord.species) } : null;
 
     //Foes[0] is the first enemy, foes[1] is the second enemy
-    const foes = ['a', 'b'].map(letter => {
-      const record = this.state.slots.get(`${foeId}${letter}`);
-      if(!record || record.hp <= 0) return null;
-      return {record, species: this.getSpecies(record.species) };
-    });
-
+    const foes = this.getFoes(foeId);
+    
     if(!me?.species || foes.every(f => f === null)) {
       return moves[0].choice;
     }
-
-    const SINGLE = ['normal', 'any', 'adjacentFoe'];
-    const SPREAD = ['allAdjacentFoes', 'allAdjacent'];
-    const SPREAD_MOD = 0.75; //Spread moves do 75% damage to each target
-    const UTILITY_SCORE = 15; //Utility moves are given a score of 20
-    const KO_BONUS = 40;
+    const incoming = this.estimateIncoming(me, foes);
 
     const candidates = [] // {choice, score}
     for (const entry of moves) { 
@@ -63,7 +63,6 @@ export class DoublesAI_v2 extends RandomPlayerAI {
       //protect type move
       if(moveData.id === 'protect' || moveData.id === 'detect') {
         //Utility move, add to candidates with a score of 20
-        const incoming = this.estimateIncoming(me, foes);
         const threatened = incoming >= me.record.hp;
         let score = threatened ? 60 : UTILITY_SCORE;
         if (this.lastChoice?.[mySlot] === 'protect') score = 5;
@@ -102,13 +101,40 @@ export class DoublesAI_v2 extends RandomPlayerAI {
           candidates.push({choice: `move ${slot}`, score: total, id:moveData.id})
       }
     }
+    //Determin if we should swap instead
+    if (!active.trapped && incoming >= me.record.hp && this.lastChoice?.[mySlot] !== 'switch') {
+      let bestSlot = 0, bestScore = -Infinity;
+      this.request.side.pokemon.forEach((p, j) => {
+        const slot = j + 1;
+        if (p.active || p.condition.endsWith('fnt') || this.pendingSwitches.has(slot)) return;
+        const s = this.scoreSwitchIn(p, foes);
+        if (s !== null && s > bestScore) {bestScore = s; bestSlot = slot; }
+      });
+      if( bestSlot) candidates.push({choice: `switch ${bestSlot}`, score: bestScore - SWITCH_COST, id: 'switch', slot: bestSlot });
+    }
     if (!candidates.length) return moves[0].choice;
     let scores = candidates.map(c=> c.score);
     const pick = this.pickMoveByFitness(scores);
-    const choesn = pick === false ? candidates[0]: candidates[pick];
-    this.lastChoice[mySlot] = choesn.id;
-    return choesn.choice;
+    const chosen = pick === false ? candidates[0]: candidates[pick];
+    this.lastChoice[mySlot] = chosen.id;
+    if (chosen.id === 'switch') this.pendingSwitches.add(chosen.slot);
+    return chosen.choice;
   }
+
+  chooseSwitch(active, switches)
+    {
+      const foeId = this.playerId === 'p1' ? 'p2' : 'p1';
+      const foes = this.getFoes(foeId)
+      if (foes.every(f => f === null)) return switches[0].slot;
+      let bestSlot = switches[0].slot;
+      let bestScore = -Infinity;
+      for (const {slot, pokemon} of switches) {
+        const score = this.scoreSwitchIn(pokemon, foes);
+        if (score === null) continue;
+        if (score > bestScore) { bestScore = score; bestSlot = slot;}
+      }
+      return bestSlot;
+    }
 
   updateState(chunk) {
     for(const line of chunk.split('\n')) {
@@ -130,6 +156,7 @@ export class DoublesAI_v2 extends RandomPlayerAI {
   }
   receiveRequest(request) {
     this.request = request;
+    this.pendingSwitches = new Set();
     super.receiveRequest(request);
   }
 //Handlers-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -139,13 +166,16 @@ export class DoublesAI_v2 extends RandomPlayerAI {
     const details = parts[3].split(',').map( s=> s.trim());
     const species = details[0];
     const level = Number((details.find(d => /^L\d+$/.test(d)) ?? 'L100').slice(1));
-    this.state.slots.set(ident.slot, {
-      species,
-      hp: 100,
-      status: null,
-      moves: new Set(),
-      level: level,
-    });
+    const key = `${ident.player}|${species}`;
+    let record = this.state.roster.get(key);
+    if(!record) {
+      record = {species,level, hp: 100, status: null, moves: new Set()};
+      this.state.roster.set(key, record)
+    }
+    const {hp, status} = this.parseCondition(parts[4]);
+    record.hp = hp;
+    record.status = status;
+    this.state.slots.set(ident.slot, record);
   }
   handleMove(parts) {
     const ident = this.parseIdent(parts[2]);
@@ -160,19 +190,11 @@ export class DoublesAI_v2 extends RandomPlayerAI {
   handleHpChange(parts) {
     const ident = this.parseIdent(parts[2]);
     if (!ident) return;
-    const condition = parts[3];
-    let hp;
-    if(condition.startsWith('0 fnt')) {
-      hp = 0;
-    } else {
-      const [current, rest] = condition.split('/');
-      const max = rest.split(' ')[0];
-      hp = (Number(current)/Number(max)) * 100;
-    }
     const slotState = this.state.slots.get(ident.slot);
-    if (slotState) {
-      slotState.hp = hp;
-    }
+    if (!slotState) return;
+    const {hp,status} = this.parseCondition(parts[3]);
+    slotState.hp = hp;
+    slotState.status = status;
   }
 
   handleStatusChange(parts, cure = false) {
@@ -206,11 +228,43 @@ export class DoublesAI_v2 extends RandomPlayerAI {
     }
   }
 
+  scoreSwitchIn(pokemon, foes) {
+      const details = pokemon.details.split(',').map(s=> s.trim());
+      const level = Number((details.find(d=> /^L\d+$/.test(d)) ?? 'L100').slice(1));
+      const candidate = {
+        record: {species: details[0], level, moves: new Set(pokemon.moves)},
+        species: this.getSpecies(details[0]),
+      };
+      if (!candidate.species) return null;
+      const hp = this.parseCondition(pokemon.condition).hp;
+      const defense = this.estimateIncoming(candidate, foes);
+      let offensiveScore = 0;
+      for(const move of pokemon.moves) {
+        const moveData = this.getMove(move);
+        if (!moveData) continue;
+        for (const foe of foes) {
+          if (!foe) continue;
+          const pct = Math.min(this.estimatePercent(moveData, candidate, foe), foe.record.hp);
+          if (pct > offensiveScore) offensiveScore = pct;
+        }
+      }
+
+      const dies = defense >= hp;
+      return offensiveScore - defense - (dies ? DEATH_PENALTY: 0);
+  }
+
   //Tools-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
   parseIdent(ident) {
     const name = ident.split(':')[0];
     if(name.length !==3) return null;
     return {slot: name, player: name.slice(0,2) };
+  }
+
+  parseCondition(condition) {
+    if (!condition || condition.startsWith('0 fnt')) return {hp: 0, status: null};
+    const [current, rest] = condition.split('/');
+    const [max, status] = rest.split(' ');
+    return {hp: (Number(current) / Number(max)) * 100, status: status ?? null};
   }
 
   getSpecies(name) {
@@ -291,4 +345,19 @@ export class DoublesAI_v2 extends RandomPlayerAI {
     return total;
   }
 
+  getFoes(foeId)  {
+    const foes = ['a', 'b'].map(letter => {
+      const record = this.state.slots.get(`${foeId}${letter}`);
+      if (!record || record.hp <= 0) return null;
+      return {record, species: this.getSpecies(record.species)};
+    })
+    return foes;
+  }
+
+  ////Foes[0] is the first enemy, foes[1] is the second enemy
+    // const foes = ['a', 'b'].map(letter => {
+    //   const record = this.state.slots.get(`${foeId}${letter}`);
+    //   if(!record || record.hp <= 0) return null;
+    //   return {record, species: this.getSpecies(record.species) };
+    // });
 }

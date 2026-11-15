@@ -3,8 +3,10 @@ import { SinglesAI } from './singlesAI.js';
 import {RandomPlayerAI} from '@pkmn/sim';
 import {TeamGenerators} from '@pkmn/randoms';
 import {mkdirSync, writeFileSync} from 'node:fs';
-import {DoublesAI_v2} from './doublesAI.js';
-import {DoublesAI_v1} from './doublesAI_v1.js';
+import {DoublesAI_v2} from './doubles_versions/doublesAI_v2.js';
+import {DoublesAI_v1} from './doubles_versions/doublesAI_v1.js';
+import { DoublesAI_v3 } from './doubles_versions/doublesAI_v3.js';
+import { DoublesAI_v4 } from './doubles_versions/doublesAI_v4.js';
 
 //Testing.js: 10/10/2026, 100 games, random battle teams, SinglesAI as p1, 64%. Compare against this.
 // ┌─────────────────────────────────────────┬───────────┐
@@ -122,4 +124,12 @@ export function makeDoubles_v1(stream, id, team) {
 
 export function makeDoubles_v2(stream, id, team) {
   return new DoublesAI_v2(stream, id, team);
+}
+
+export function makeDoubles_v3(stream, id, team) {
+  return new DoublesAI_v3(stream, id, team);
+}
+
+export function makeDoubles_v3(stream, id, team) {
+  return new DoublesAI_v4(stream, id, team);
 }

@@ -246,57 +246,15 @@ class BattleStatsCollector {
     return report;
   }
 }
-
-function generateBattleReport(player1, player2, player1Name = 'Player 1', player2Name = 'Player 2') {
-  const buildReport = (player, playerName) => {
-    let report = `\n--- ${playerName}'s Intel on Opponent ---\n`;
-
-    if (player.state.roster) {
-      const foeId = player.playerId === 'p1' ? 'p2' : 'p1';
-      const foes = [...player.state.roster].filter(([key])=> key.startsWith(`${foeId}|`));
-      if (!foes.length) return report + 'No Pokémon were identified\n'
-      for (const [, rec] of foes) {
-        const status = rec.status ?? 'none';
-        const moves = rec.moves.size ? [...rec.moves].join (', ') : 'no moves seen';
-        report += ` - ${rec.species}: ${Math.round(rec.hp)} %hp, status ${status}, [${moves}]\n`;
-      }
-      return report;
-    }
-
-    const opponent = player.state.opponent;
-    if (!opponent) return report + 'There is no opponent\n';
-
-    if (!opponent.pokemon || opponent.pokemon.length === 0) {
-      report += "No Pokémon were identified.\n";
-    } else {
-      report += `Identified Pokémon: ${opponent.pokemon.join(', ')}\n`;
-    }
-
-    report += 'Known Status Effects on Pokémon:\n';
-    if (opponent.statusEffects && opponent.statusEffects.size > 0) {
-      for (const [pokemon, status] of opponent.statusEffects.entries()) {
-        report += ` - ${pokemon}: ${status}\n`;
-      }
-    } else {
-      report += '  None\n';
-    }
-
-    report += 'Known Moves:\n';
-    if (opponent.moves && opponent.moves.size > 0) {
-      for (const [pokemon, moves] of opponent.moves.entries()) {
-        const moveList = Array.from(moves).join(', ');
-        report += `  - ${pokemon}: [${moveList}]\n`;
-      }
-    } else {
-      report += '  No moves were recorded.\n';
-    }
-
-    return report;
-  };
-
-  // Combine both players' reports into a single string
-  return buildReport(player1, player1Name) + '\n' + buildReport(player2, player2Name);
-}
+//----------------------------------VALIDATION----------------------------------
+app.post('/simulation/validate', (req, res) => {
+  const { teamJson, formatJson } = req.body; 
+  const errors = validateTeam(teamJson, formatJson);
+  if (errors) {
+    return res.status(200).json({ error: errors });
+  }
+  return res.status(200).json({ valid: true });
+});
 
 //----------------------------------TESTING----------------------------------
 
@@ -309,6 +267,10 @@ app.post('/simulation/abtest', async (req, res) => {
 
   if (!formatJson) {
     return res.status(400).json({ error: 'Format not selected.' });
+  }
+
+  if(formatJson === 'gen9randombattle' || formatJson === 'gen9unratedrandombattle' || formatJson === 'gen9freeforallrandombattle' || formatJson === 'gen9randombattleblitz') {
+    return res.status(400).json({ error: 'Random Battle formats are not supported for A/B testing. Please select a different format.' });
   }
 
   if (!Number.isInteger(numSimulations) || numSimulations <= 0 || numSimulations > 500) { 
@@ -327,13 +289,12 @@ app.post('/simulation/abtest', async (req, res) => {
 
   const spec = { formatid: formatJson };
 
-  const validator = TeamValidator.get(spec.formatid);
-  const team1Errors = validator.validateTeam(team1Json);
-  const team2Errors = validator.validateTeam(team2Json);
+  const team1Errors = validateTeam(team1Json, formatJson);
+  const team2Errors = validateTeam(team2Json, formatJson);
 
   if (team1Errors || team2Errors) {
     console.log(`Validation error in simulation`);
-    return res.status(400).json({errorTeam1: team1Errors, errorTeam2: team2Errors});
+    return res.status(200).json({errorTeam1: team1Errors, errorTeam2: team2Errors});
   }
 
   for (let i = 0; i < numSimulations; i++) {
@@ -439,3 +400,64 @@ app.post('/simulation/abtest', async (req, res) => {
     monStats: collector.toJSON(),
   });
 });
+
+//----------------------------------TOOLS----------------------------------
+function generateBattleReport(player1, player2, player1Name = 'Player 1', player2Name = 'Player 2') {
+  const buildReport = (player, playerName) => {
+    let report = `\n--- ${playerName}'s Intel on Opponent ---\n`;
+
+    if (player.state.roster) {
+      const foeId = player.playerId === 'p1' ? 'p2' : 'p1';
+      const foes = [...player.state.roster].filter(([key])=> key.startsWith(`${foeId}|`));
+      if (!foes.length) return report + 'No Pokémon were identified\n'
+      for (const [, rec] of foes) {
+        const status = rec.status ?? 'none';
+        const moves = rec.moves.size ? [...rec.moves].join (', ') : 'no moves seen';
+        report += ` - ${rec.species}: ${Math.round(rec.hp)} %hp, status ${status}, [${moves}]\n`;
+      }
+      return report;
+    }
+
+    const opponent = player.state.opponent;
+    if (!opponent) return report + 'There is no opponent\n';
+
+    if (!opponent.pokemon || opponent.pokemon.length === 0) {
+      report += "No Pokémon were identified.\n";
+    } else {
+      report += `Identified Pokémon: ${opponent.pokemon.join(', ')}\n`;
+    }
+
+    report += 'Known Status Effects on Pokémon:\n';
+    if (opponent.statusEffects && opponent.statusEffects.size > 0) {
+      for (const [pokemon, status] of opponent.statusEffects.entries()) {
+        report += ` - ${pokemon}: ${status}\n`;
+      }
+    } else {
+      report += '  None\n';
+    }
+
+    report += 'Known Moves:\n';
+    if (opponent.moves && opponent.moves.size > 0) {
+      for (const [pokemon, moves] of opponent.moves.entries()) {
+        const moveList = Array.from(moves).join(', ');
+        report += `  - ${pokemon}: [${moveList}]\n`;
+      }
+    } else {
+      report += '  No moves were recorded.\n';
+    }
+
+    return report;
+  };
+
+  // Combine both players' reports into a single string
+  return buildReport(player1, player1Name) + '\n' + buildReport(player2, player2Name);
+}
+
+function validateTeam(teamJson, formatJson) {
+  if(!formatJson || !Dex.formats.get(formatJson).exists) {
+    return ['Unknown format. Please select a valid format.'];
+  }
+  const validator = TeamValidator.get(formatJson);
+  const errors = validator.validateTeam(teamJson);
+  return errors;
+}

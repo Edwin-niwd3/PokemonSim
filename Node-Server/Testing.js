@@ -130,6 +130,6 @@ export function makeDoubles_v3(stream, id, team) {
   return new DoublesAI_v3(stream, id, team);
 }
 
-export function makeDoubles_v3(stream, id, team) {
+export function makeDoubles_v4(stream, id, team) {
   return new DoublesAI_v4(stream, id, team);
 }

@@ -95,7 +95,14 @@ Response:
 
 `monStats` is keyed by species for each side. `averageLifespan` is in turns, from a Pokemon's first entry until it faints or the battle ends. A battle where a bot throws or that runs longer than 30 seconds is counted in `crashes` and left out of the wins and `monStats`.
 
-If either team fails Showdown's validator for the chosen format, the server responds with status 400 and `errorTeam1` / `errorTeam2` arrays of validation messages.
+If either team fails Showdown's validator for the chosen format, or the format does not exist, no battles are run and the response contains `errorTeam1` / `errorTeam2` arrays of validation messages instead.
+
+`POST /simulation/validate`
+Checks one team against a format without running any battles. The frontend calls it whenever a team or the format changes.
+
+Request body: `{ "teamJson": [ /* array of Pokemon */ ], "formatJson": "gen9ou" }`
+
+Response: `{ "valid": true }` for a legal team, or `{ "error": [ "Garchomp can't learn Spore." ] }` with one message per problem.
 
 `POST /simulation/begin`
 Runs a single battle and returns the full battle log plus a report of what each bot learned about its opponent. Takes the same body as `abtest` minus `numSimulations`. Useful for debugging bot behaviour.
@@ -172,7 +179,7 @@ The singles number came from a sequence of changes, each measured against the pr
 
 ### Known issues
 
-- `Testing.js` does not load at the moment: `makeDoubles_v3` is declared twice (the second one should be `makeDoubles_v4`), and `makeDoubles` refers to a `DoublesAI` working copy that no longer exists. The server does not import `Testing.js`, so it is unaffected.
+- In `Testing.js`, the `makeDoubles` factory refers to a `DoublesAI` working copy that no longer exists and throws if used. Use `makeDoubles_v1` to `makeDoubles_v4` instead.
 - Damage estimates ignore items, abilities, weather, terrain, stat boosts, and the Tera type.
 - The singles bot's damage estimate is a stat-ratio heuristic, not the real formula the doubles bot uses.
 - Neither bot handles team preview.
@@ -222,8 +229,7 @@ node pokemon-showdown start --no-security
 
 ## Roadmap
 
-1. Repair `Testing.js` so the bench runs again.
-2. Team preview for both bots.
-3. Fold items, abilities, boosts, and weather into the damage estimate, and move the singles bot onto the real damage formula.
-4. Add a small CLI around `runBench` so benches don't need a one-liner.
-5. Revisit reinforcement learning with the heuristic bots as the training opponent.
+1. Team preview for both bots.
+2. Fold items, abilities, boosts, and weather into the damage estimate, and move the singles bot onto the real damage formula.
+3. Add a small CLI around `runBench` so benches don't need a one-liner.
+4. Revisit reinforcement learning with the heuristic bots as the training opponent.

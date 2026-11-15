@@ -2,11 +2,13 @@
 
 Backend for the Pokemon win-rate calculator. It runs headless Pokemon Showdown battles between two user-built teams, with a scripted bot controlling each side, and reports how often each team wins. The frontend lives in the sibling folder `../pkmn-sim-frontend`.
 
+**Live site:** https://pokesim.edwinapp.org (the API itself runs at https://pokemonsim.onrender.com)
+
 Two parts live here:
 
 | Folder | What it is | Status |
 |---|---|---|
-| `Node-Server/` | Express API that runs the battles using `@pkmn/sim`, plus the heuristic singles and doubles bots and a benchmark harness | Working. Singles bot wins ~87% vs random, doubles bot ~89% vs random |
+| `Node-Server/` | Express API that runs the battles using `@pkmn/sim`, plus the heuristic singles and doubles bots and a benchmark harness | Working and deployed. Singles bot wins ~87% vs random, doubles bot ~91% vs random |
 | `python-ai/` | Reinforcement-learning experiments built on `poke-env` and Stable Baselines 3 | Experimental, not connected to the server |
 
 ## Node-Server
@@ -21,10 +23,16 @@ Two parts live here:
 ```bash
 cd Node-Server
 npm install
-node simulation.js
+npm start
 ```
 
-The server listens on `http://localhost:3000`. There is no build step; the files are plain ES modules.
+The server listens on the port in the `PORT` environment variable, or `http://localhost:3000` when it is not set. There is no build step; the files are plain ES modules.
+
+Cross-origin requests are only accepted from the live site and from `http://localhost:5173` (the frontend dev server). To call the API from another origin, add it to the `cors` list at the top of `simulation.js`.
+
+### Deployment
+
+The server runs as a Render web service with root directory `Node-Server`, build command `npm install`, and start command `npm start`. Render redeploys on every push to `main`.
 
 ### Files
 
@@ -32,8 +40,8 @@ The server listens on `http://localhost:3000`. There is no build step; the files
 |---|---|
 | `simulation.js` | Express server and the two endpoints below |
 | `singlesAI.js` | `SinglesAI`, the heuristic bot for 6v6 singles. Used by the server. |
-| `doublesAI.js` | `DoublesAI_v2`, the current heuristic bot for doubles / VGC. Not wired into the server yet. |
-| `doublesAI_v1.js` | `DoublesAI_v1`, the previous doubles bot without the Protect logic. Kept so the bench can compare versions. |
+| `doubles_versions/doublesAI_v4.js` | `DoublesAI_v4`, the current heuristic bot for doubles / VGC. Used by the server. |
+| `doubles_versions/doublesAI_v1.js` to `v3.js` | Earlier frozen doubles bots. Kept so the bench can compare versions. |
 | `Testing.js` | Benchmark harness that pits any two bots against each other on random-battle teams |
 | `playground/doublesAI.js` | The original doubles bot, a copy of the singles bot with half-finished slot handling. Dead code, kept for reference. |
 
@@ -56,6 +64,8 @@ Request body:
 }
 ```
 
+`numSimulations` must be a whole number from 1 to 500 and defaults to 50.
+
 Response:
 
 ```json
@@ -65,17 +75,32 @@ Response:
   "player1Wins": 54,
   "player2Wins": 46,
   "draws": 0,
+  "crashes": 0,
   "averageDurationMs": "38.12",
-  "winRates": { "player1": "54.0%", "player2": "46.0%", "draws": "0.0%" }
+  "winRates": { "player1": "54.0%", "player2": "46.0%", "draws": "0.0%" },
+  "monStats": {
+    "p1": {
+      "Garchomp": {
+        "appearances": 100,
+        "faints": 61,
+        "averageLifespan": 7.42,
+        "mostUsedMove": "Earthquake",
+        "moves": { "Earthquake": 212, "Stealth Rock": 88 }
+      }
+    },
+    "p2": { }
+  }
 }
 ```
+
+`monStats` is keyed by species for each side. `averageLifespan` is in turns, from a Pokemon's first entry until it faints or the battle ends. A battle where a bot throws or that runs longer than 30 seconds is counted in `crashes` and left out of the wins and `monStats`.
 
 If either team fails Showdown's validator for the chosen format, the server responds with status 400 and `errorTeam1` / `errorTeam2` arrays of validation messages.
 
 `POST /simulation/begin`
 Runs a single battle and returns the full battle log plus a report of what each bot learned about its opponent. Takes the same body as `abtest` minus `numSimulations`. Useful for debugging bot behaviour.
 
-Both endpoints always use `SinglesAI` for both sides, regardless of format. Doubles formats will validate and run, but the singles bot does not understand two active slots, so results in those formats are not meaningful yet.
+Both endpoints pick the bot from the format's game type: `DoublesAI_v4` for doubles formats and `SinglesAI` for everything else.
 
 ### Team format
 
@@ -105,7 +130,7 @@ Extends `RandomPlayerAI` from `@pkmn/sim` and overrides `chooseMove` and `choose
 
 `chooseSwitch` handles forced switches after a faint. Each bench Pokemon is scored by its best estimated hit on the opponent minus the opponent's best known hit on it, and the highest net score comes in.
 
-### The doubles bot (`DoublesAI_v2`)
+### The doubles bot (`DoublesAI_v4`)
 
 Rebuilt from scratch for two active Pokemon per side rather than adapted from the singles bot. Same two layers, different internals:
 
@@ -118,9 +143,9 @@ Rebuilt from scratch for two active Pokemon per side rather than adapted from th
 
    The move is then sampled with the same tenth-power lottery as the singles bot.
 
-Switching, forced replacements after a faint, and team preview are still left to the base class's random choice.
+On top of that, v3 added matchup-based replacement after a faint, and v4 added a per-side roster that remembers each Pokemon's HP, status, and revealed moves across switches, plus voluntary switching when the active Pokemon is threatened. Team preview is still left to the base class's random choice.
 
-`DoublesAI_v1` is identical minus the Protect logic. The old `playground/doublesAI.js` is the earlier attempt described in the previous README and is not used anywhere.
+`DoublesAI_v2` is the version described in the numbered list above, and `DoublesAI_v1` is identical minus the Protect logic. The old `playground/doublesAI.js` is the earlier attempt described in the previous README and is not used anywhere.
 
 ### Benchmark harness (`Testing.js`)
 
@@ -147,12 +172,11 @@ The singles number came from a sequence of changes, each measured against the pr
 
 ### Known issues
 
-- `simulation.js` imports `DoublesAI` from `doublesAI.js` and `SinglesVsRandom` from `Testing.js`, but neither export exists any more (the classes are now `DoublesAI_v2` and `runBench`). Node refuses to load the module, so **the server currently does not start** until those two import lines are fixed. `makeDoubles` in `Testing.js` has the same problem.
-- The server never routes doubles formats to the doubles bot.
+- `Testing.js` does not load at the moment: `makeDoubles_v3` is declared twice (the second one should be `makeDoubles_v4`), and `makeDoubles` refers to a `DoublesAI` working copy that no longer exists. The server does not import `Testing.js`, so it is unaffected.
 - Damage estimates ignore items, abilities, weather, terrain, stat boosts, and the Tera type.
 - The singles bot's damage estimate is a stat-ratio heuristic, not the real formula the doubles bot uses.
-- The doubles bot has no switching logic at all, and neither bot handles team preview.
-- In `abtest`, a bot crash mid-battle hangs the request. The bench harness has a timeout; the server does not.
+- Neither bot handles team preview.
+- Battles run one after another on a single thread, so a large `abtest` request delays other users until it finishes.
 
 ## python-ai
 
@@ -198,9 +222,8 @@ node pokemon-showdown start --no-security
 
 ## Roadmap
 
-1. Fix the stale imports in `simulation.js` so the server starts again.
-2. Route doubles formats (`gen9vgc*`, `gen9doubles*`) to `DoublesAI_v2` and expose them in the frontend format list.
-3. Give the doubles bot switching and replacement logic, then team preview for both bots.
-4. Fold items, abilities, boosts, and weather into the damage estimate, and move the singles bot onto the real damage formula.
-5. Add a small CLI around `runBench` so benches don't need a one-liner.
-6. Revisit reinforcement learning with the heuristic bots as the training opponent.
+1. Repair `Testing.js` so the bench runs again.
+2. Team preview for both bots.
+3. Fold items, abilities, boosts, and weather into the damage estimate, and move the singles bot onto the real damage formula.
+4. Add a small CLI around `runBench` so benches don't need a one-liner.
+5. Revisit reinforcement learning with the heuristic bots as the training opponent.

@@ -256,6 +256,21 @@ app.post('/simulation/validate', (req, res) => {
   return res.status(200).json({ valid: true });
 });
 
+//----------------------------------IMPORT-----------------------------------
+app.post('/simulation/import', (req, res) => {
+  const { text } = req.body;
+  if ( typeof text !== 'string' || !text.trim()) {
+    return res.status(400).json({error: 'Paste a team first.'});
+  }
+
+  const sets = Teams.import(text)
+  if(!sets || !sets.length) {
+    return res.status(400).json({ error: 'Could not read that as a Showdown team.'});
+  }
+  return res.status(200).json({team: sets.slice(0,6) });
+})
+
+
 //----------------------------------TESTING----------------------------------
 
 app.post('/simulation/abtest', async (req, res) => {

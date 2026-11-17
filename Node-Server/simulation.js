@@ -9,6 +9,14 @@ import cors from 'cors'
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    console.log(`${req.method} ${req.originalUrl} ${res.statusCode} ${Date.now() - start}ms Origin: ${req.get('origin') ?? '-'}`);
+  });
+  next();
+});
+
 app.use(express.urlencoded({extended: true}));
 app.use(express.json());
 app.use(cors({origin: ['https://pokesim.edwinapp.org', 'http://localhost:5173']}));
